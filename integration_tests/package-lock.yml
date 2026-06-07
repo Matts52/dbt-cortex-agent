@@ -1,0 +1,7 @@
+packages:
+  - local: ../
+    name: dbt_cortex_agent
+  - name: dbt_semantic_view
+    package: Snowflake-Labs/dbt_semantic_view
+    version: 1.0.5
+sha1_hash: f6446e0f7e0e01b07baea0bad2c1aad9c7d1511f

@@ -1,0 +1,8 @@
+packages:
+  # The package under test.
+  - local: ../
+
+  # Used to materialize a Semantic View that the agent's
+  # cortex_analyst_text_to_sql tool can reference.
+  - package: Snowflake-Labs/dbt_semantic_view
+    version: [">=1.0.0", "<2.0.0"]

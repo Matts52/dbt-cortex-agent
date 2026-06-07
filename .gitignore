@@ -1,0 +1,16 @@
+# dbt artifacts
+target/
+dbt_packages/
+logs/
+
+# dbt user files
+.user.yml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# macOS
+.DS_Store

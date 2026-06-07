@@ -1,0 +1,69 @@
+version: 2
+
+macros:
+  - name: snowflake__create_or_replace_cortex_agent
+    description: >
+      Orchestrates the CREATE OR REPLACE AGENT statement for a model using the
+      `cortex_agent` materialization. Runs pre/post hooks and returns the
+      target relation. Called internally by the materialization — not intended
+      for direct use.
+
+  - name: snowflake__get_create_cortex_agent_sql
+    description: >
+      Produces the DDL string that creates a Cortex Agent. Operates in two
+      modes controlled by the `raw_ddl` model config:
+
+      - Specification mode (default, `raw_ddl=false`): wraps the model body in
+        `FROM SPECIFICATION $$ ... $$` and emits the optional `COMMENT` and
+        `PROFILE` clauses from config.
+
+      - Raw DDL mode (`raw_ddl=true`): treats the model body as everything
+        following `CREATE OR REPLACE AGENT <name>` and passes it through
+        verbatim to Snowflake.
+    arguments:
+      - name: relation
+        type: SnowflakeRelation or string
+        description: The fully-qualified agent name used in the DDL.
+      - name: sql
+        type: string
+        description: The compiled body of the dbt model.
+
+  - name: snowflake__get_drop_cortex_agent_sql
+    description: >
+      Returns the `DROP AGENT IF EXISTS` DDL string for the given relation.
+    arguments:
+      - name: relation
+        type: SnowflakeRelation
+        description: The agent relation to drop.
+
+  - name: snowflake__get_cortex_agent_rename_sql
+    description: >
+      Returns the `ALTER AGENT ... RENAME TO` DDL string.
+    arguments:
+      - name: relation
+        type: SnowflakeRelation
+        description: The agent relation to rename.
+      - name: new_name
+        type: SnowflakeRelation or string
+        description: The new name for the agent.
+
+  - name: cortex_agent_quote_string
+    description: >
+      Wraps a value in single quotes for use as a SQL string literal, escaping
+      any embedded single quotes by doubling them.
+    arguments:
+      - name: value
+        type: string
+        description: 'The value to quote. Example: "Sales assistant"'
+
+  - name: cortex_agent_render_profile
+    description: >
+      Renders the PROFILE clause value. Accepts either a dict (serialized to
+      JSON automatically) or a pre-serialized JSON string. Returns a quoted SQL
+      string literal suitable for use in `PROFILE = ...`.
+    arguments:
+      - name: profile
+        type: dict or string
+        description: >
+          Agent profile configuration. Example as dict:
+          {'display_name': 'Sales Assistant', 'avatar': 'icon.png', 'color': 'blue'}

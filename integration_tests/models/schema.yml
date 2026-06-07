@@ -1,0 +1,25 @@
+version: 2
+
+models:
+  - name: orders_base
+    description: "Base orders table seeded from orders_seed."
+    columns:
+      - name: order_id
+        tests:
+          - not_null
+          - unique
+      - name: region
+        tests:
+          - not_null
+
+  - name: orders_semantic_view
+    description: "Semantic view over orders_base, referenced by agent_with_semantic_view."
+
+  - name: agent_minimal
+    description: "Cortex Agent with instructions only (no tools)."
+
+  - name: agent_with_semantic_view
+    description: "Cortex Agent whose Analyst tool references orders_semantic_view."
+
+  - name: agent_raw_ddl
+    description: "Cortex Agent created via raw_ddl pass-through mode."
