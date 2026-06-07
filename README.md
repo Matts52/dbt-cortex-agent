@@ -11,6 +11,8 @@ views, Cortex Search services) with `ref()` / `source()`, and let
 `dbt build` create or replace it in Snowflake — fully integrated into your
 DAG, lineage, and orchestration.
 
+Currently, as Cortex Agents are only available on the Snowflake adapter, this package is only available to be used on the Snowflake adapter.
+
 ---
 
 ## At a glance
