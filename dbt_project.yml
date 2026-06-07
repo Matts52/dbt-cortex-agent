@@ -1,0 +1,18 @@
+# dbt_cortex_agent
+#
+# A dbt package that adds a `cortex_agent` materialization for creating and
+# managing Snowflake Cortex Agents (CREATE AGENT) directly from dbt.
+
+config-version: 2
+
+name: 'dbt_cortex_agent'
+version: '0.1.0'
+require-dbt-version: [">=1.5.0", "<3.0.0"]
+
+macro-paths: ["macros"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"

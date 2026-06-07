@@ -1,0 +1,35 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  compile-tests-duckdb:
+    name: Compile Tests (DuckDB)
+    runs-on: ubuntu-latest
+
+    env:
+      DBT_PROFILES_DIR: ${{ github.workspace }}/integration_tests
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dbt-duckdb
+        run: pip install -U pip dbt-duckdb
+
+      - name: Install dbt dependencies
+        working-directory: integration_tests
+        run: dbt deps --target duckdb
+
+      - name: Compile agent models
+        working-directory: integration_tests
+        run: dbt compile --select "agent_*" --target duckdb
+
