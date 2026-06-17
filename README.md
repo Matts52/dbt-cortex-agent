@@ -95,6 +95,9 @@ tool_resources:
   Search1:
     name: "{{ source('cortex', 'policy_search_service') }}"
     max_results: 5
+    filter:
+      "@eq":
+        region: "North America"
     title_column: "title"
     id_column: "doc_id"
 ```
