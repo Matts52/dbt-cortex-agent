@@ -1,0 +1,9 @@
+version: 2
+
+sources:
+  - name: cortex_test
+    database: "{{ env_var('SNOWFLAKE_TEST_DATABASE', 'DEV') }}"
+    schema: "{{ env_var('SNOWFLAKE_TEST_SCHEMA', 'PUBLIC') }}"
+    tables:
+      - name: policy_search_service
+        description: "Placeholder source for compile-time resolution of Cortex Search service."

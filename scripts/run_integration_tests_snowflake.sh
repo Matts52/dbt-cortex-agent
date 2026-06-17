@@ -34,7 +34,7 @@ echo "==> Installing dbt dependencies"
 dbt deps --target snowflake
 
 echo "==> Running dbt build"
-dbt build --target snowflake
+dbt build --target snowflake --exclude agent_with_search
 
 echo "==> Asserting agents exist"
 dbt run-operation assert_agents_exist --target snowflake

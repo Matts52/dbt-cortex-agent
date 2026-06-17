@@ -23,3 +23,6 @@ models:
 
   - name: agent_raw_ddl
     description: "Cortex Agent created via raw_ddl pass-through mode."
+
+  - name: agent_with_search
+    description: "Cortex Agent with a Cortex Search tool; verifies full tool_resources syntax including filter, max_results, title_column, id_column."
