@@ -28,3 +28,6 @@ tools:
 tool_resources:
   OrdersAnalyst:
     semantic_view: "{{ ref('orders_semantic_view') }}"
+    execution_environment:
+      type: "warehouse"
+      warehouse: "{{ env_var('SNOWFLAKE_TEST_WAREHOUSE', 'COMPUTE_WH') }}"
