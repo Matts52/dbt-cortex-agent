@@ -92,6 +92,9 @@ tools:
 tool_resources:
   Analyst1:
     semantic_view: "{{ ref('sales_semantic_view') }}"
+    execution_environment:
+      type: "warehouse"
+      warehouse: "MY_WAREHOUSE"
   Search1:
     name: "{{ source('cortex', 'policy_search_service') }}"
     max_results: 5
