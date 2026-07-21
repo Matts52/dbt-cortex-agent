@@ -1,7 +1,7 @@
 {% macro cortex_skill__resolve_skill_dir() -%}
 {#-
---  Finds the sibling skill directory for the current cortex_skill model and
---  returns its absolute path for use in a PUT command.
+--  Returns the relative path to the sibling skill directory for the current
+--  cortex_skill model, for use in a PUT command.
 --
 --  Convention: the skill directory has the same name as the .sql model
 --  (without the extension) and lives in the same directory:
@@ -11,23 +11,14 @@
 --  The directory must contain at least a SKILL.md file. Any additional files
 --  (e.g. Python scripts for code execution) are also uploaded to the stage.
 --
---  Raises a compiler error if the directory or SKILL.md is missing.
+--  Existence validation is deferred to runtime: after the PUT, the Snowflake
+--  materialization issues a LIST query to confirm files (including SKILL.md)
+--  were actually uploaded, raising a descriptive compiler error if not.
+--
+--  The returned relative path is resolved by Snowflake's Python connector
+--  against the process cwd, which dbt sets to the project root at runtime.
 -#}
-  {%- set dir_relative = model['original_file_path'][:-4] -%}
-  {%- set dir_abs = modules.os.path.join(modules.os.getcwd(), dir_relative) -%}
-  {%- if not modules.os.path.isdir(dir_abs) -%}
-    {{ exceptions.raise_compiler_error(
-        "cortex_skill: skill directory not found at '" ~ dir_abs ~ "'. "
-        ~ "Create a '" ~ dir_relative ~ "/' directory alongside your .sql model."
-    ) }}
-  {%- endif -%}
-  {%- if not modules.os.path.exists(modules.os.path.join(dir_abs, 'SKILL.md')) -%}
-    {{ exceptions.raise_compiler_error(
-        "cortex_skill: SKILL.md not found in '" ~ dir_abs ~ "'. "
-        ~ "Every skill directory must contain a SKILL.md file."
-    ) }}
-  {%- endif -%}
-  {{- dir_abs -}}
+  {{- model['original_file_path'][:-4] -}}
 {%- endmacro %}
 
 
@@ -60,6 +51,27 @@
     {{ dbt_cortex_agent.snowflake__get_create_cortex_skill_sql(target_relation, skill_dir, skill_path) }}
   {%- endcall %}
 
+  -- validate that files were actually uploaded (confirms local directory existed)
+  {%- set list_result = run_query("list " ~ skill_path ~ "/") -%}
+  {%- if list_result.rows | length == 0 -%}
+    {{ exceptions.raise_compiler_error(
+        "cortex_skill: no files found at stage path '" ~ skill_path ~ "'. "
+        ~ "Ensure a '" ~ skill_dir ~ "/' directory exists alongside your .sql model."
+    ) }}
+  {%- endif -%}
+  {%- set ns = namespace(found_skill_md=false) -%}
+  {%- for row in list_result.rows -%}
+    {%- if 'SKILL.md' in row[0] -%}
+      {%- set ns.found_skill_md = true -%}
+    {%- endif -%}
+  {%- endfor -%}
+  {%- if not ns.found_skill_md -%}
+    {{ exceptions.raise_compiler_error(
+        "cortex_skill: SKILL.md not found in stage '" ~ skill_path ~ "'. "
+        ~ "Every skill directory must contain a SKILL.md file."
+    ) }}
+  {%- endif -%}
+
   {{ run_hooks(post_hooks) }}
 
   {{ return({'relations': [target_relation]}) }}
@@ -74,7 +86,7 @@
 --
 --  Args:
 --  - relation:   SnowflakeRelation or str (for context)
---  - skill_dir:  str - absolute local path to the skill directory
+--  - skill_dir:  str - relative local path to the skill directory (from project root)
 --  - skill_path: str - fully-qualified stage path prefix,
 --                      e.g. '@my_db.my_schema.skill_stage/skills/forecaster_skill'
 --
