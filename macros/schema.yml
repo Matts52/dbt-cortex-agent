@@ -47,6 +47,77 @@ macros:
         type: SnowflakeRelation or string
         description: The new name for the agent.
 
+  - name: cortex_skill__resolve_skill_dir
+    description: >
+      Finds the sibling skill directory for the current cortex_skill model and
+      returns its absolute path. The directory must have the same base name as
+      the .sql model (e.g. models/skills/my_skill/ alongside
+      models/skills/my_skill.sql) and must contain at least a SKILL.md file.
+      Raises a compiler error if the directory or SKILL.md is missing.
+      Called internally — not intended for direct use.
+
+  - name: snowflake__create_or_replace_cortex_skill
+    description: >
+      Orchestrates uploading all files in the sibling skill directory to a
+      Snowflake stage for a model using the `cortex_skill` materialization.
+      Creates the stage with CREATE STAGE IF NOT EXISTS, then runs pre/post
+      hooks around the PUT statement. Called internally by the materialization
+      — not intended for direct use.
+
+  - name: snowflake__get_create_cortex_skill_sql
+    description: >
+      Produces the PUT statement that uploads all files in the skill directory
+      to the stage using a wildcard. PUT gives exact filename control, avoiding
+      the suffix that COPY INTO appends to output files.
+    arguments:
+      - name: relation
+        type: SnowflakeRelation or string
+        description: The relation representing this skill node (used for context).
+      - name: skill_dir
+        type: string
+        description: Absolute local path to the sibling skill directory.
+      - name: skill_path
+        type: string
+        description: >
+          Fully-qualified stage path prefix,
+          e.g. '@my_db.my_schema.skill_stage/skills/forecaster_skill'.
+
+  - name: cortex_skill_path
+    description: >
+      Returns the stage path for a cortex_skill model given its ref(), for use
+      in a cortex_agent's skills: section. Calling ref() as the argument
+      registers the DAG dependency (agent is created after the skill file is
+      uploaded) and the macro looks up the skill model's stage config from the
+      graph so no var() or hard-coded path is needed. Must be called inside an
+      execute=True context; returns a placeholder during parse time.
+    arguments:
+      - name: skill_ref
+        type: Relation
+        description: >
+          The Relation returned by ref() for the cortex_skill model, e.g.
+          ref('forecaster_skill').
+
+  - name: snowflake__get_drop_cortex_skill_sql
+    description: >
+      No-op. Skills are stage files with no SQL DROP statement. To remove a
+      skill's file, run REMOVE @<stage>/skills/<name>/SKILL.md manually.
+    arguments:
+      - name: relation
+        type: SnowflakeRelation
+        description: The skill relation to drop (unused).
+
+  - name: snowflake__get_cortex_skill_rename_sql
+    description: >
+      No-op. Skills are stage files; renaming requires COPY FILES + REMOVE
+      executed manually on the stage.
+    arguments:
+      - name: relation
+        type: SnowflakeRelation
+        description: The skill relation to rename (unused).
+      - name: new_name
+        type: SnowflakeRelation or string
+        description: The new name (unused).
+
   - name: cortex_agent_quote_string
     description: >
       Wraps a value in single quotes for use as a SQL string literal, escaping
