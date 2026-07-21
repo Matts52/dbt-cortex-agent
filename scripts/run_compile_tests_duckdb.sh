@@ -15,8 +15,8 @@ cd "$INTEGRATION_TESTS_DIR"
 echo "==> Installing dbt dependencies"
 dbt deps --target duckdb
 
-echo "==> Compiling agent models"
-dbt compile --select "agent_*" --target duckdb
+echo "==> Compiling agent and skill models"
+dbt compile --select "agent_* forecaster_skill" --target duckdb
 
 echo "==> Compiled SQL written to target/compiled/"
 find target/compiled -name "agent_*.sql" | sort | while read -r f; do

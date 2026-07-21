@@ -1,14 +1,15 @@
 # dbt_cortex_agent
 
-A dbt package that adds a **`cortex_agent`** materialization for creating and
-managing [Snowflake Cortex Agents](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents)
-(`CREATE AGENT`) directly from dbt — the same way the
+A dbt package that adds **`cortex_agent`** and **`cortex_skill`** materializations
+for creating and managing [Snowflake Cortex Agents](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents)
+and [Agent Skills](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents-skills)
+directly from dbt — the same way the
 [`dbt_semantic_view`](https://github.com/Snowflake-Labs/dbt_semantic_view) package
 manages Semantic Views.
 
-Define an agent as a dbt model, wire its tools to other dbt models (semantic
+Define agents and skills as dbt models, wire tools to other dbt models (semantic
 views, Cortex Search services) with `ref()` / `source()`, and let
-`dbt build` create or replace it in Snowflake — fully integrated into your
+`dbt build` deploy everything in dependency order — fully integrated into your
 DAG, lineage, and orchestration.
 
 Currently, as Cortex Agents are only available on the Snowflake adapter, this package is only available to be used on the Snowflake adapter.
@@ -17,10 +18,10 @@ Currently, as Cortex Agents are only available on the Snowflake adapter, this pa
 
 ## At a glance
 
-- **Materialization:** `cortex_agent`
+- **Materializations:** `cortex_agent`, `cortex_skill`
 - **Warehouse:** Snowflake (Cortex Agents)
 - **dbt compatibility:** dbt 1.5+
-- **Underlying DDL:** [`CREATE AGENT`](https://docs.snowflake.com/en/sql-reference/sql/create-agent)
+- **Underlying DDL:** [`CREATE AGENT`](https://docs.snowflake.com/en/sql-reference/sql/create-agent) / `PUT 'file://...' @stage`
 
 > **Full SQL API coverage.** The default mode wraps your model body in
 > `FROM SPECIFICATION $$ ... $$`, so the entire agent specification grammar is
@@ -149,7 +150,101 @@ $$
 
 ---
 
-## Configuration reference
+## Skills (`cortex_skill` materialization)
+
+[Agent skills](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents-skills)
+are modular packages of instructions (and optional scripts) that give agents repeatable,
+task-specific capabilities. Snowflake stores them as files on a named stage — there is no
+`CREATE SKILL` SQL statement.
+
+The `cortex_skill` materialization uploads a skill's `SKILL.md` file to a Snowflake stage
+automatically during `dbt build`, before any agent that depends on it is created.
+
+### Defining a skill
+
+Skill files live in a directory alongside the `.sql` model — same name as the model, no
+extension. The directory must contain at least `SKILL.md` and may include any companion
+scripts (e.g. `.py` files for the code execution tool). The `.sql` model is config only:
+
+```
+models/
+  skills/
+    forecaster_skill.sql       ← dbt model (config only)
+    forecaster_skill/          ← skill directory (all files uploaded to stage)
+      SKILL.md                 ← required
+      forecaster.py            ← optional companion scripts
+```
+
+`models/skills/forecaster_skill.sql`:
+
+```sql
+{{
+  config(
+    materialized = 'cortex_skill',
+    stage        = '@my_db.my_schema.skill_stage'
+  )
+}}
+```
+
+At runtime the materialization runs:
+
+```sql
+CREATE STAGE IF NOT EXISTS my_db.my_schema.skill_stage;
+
+PUT 'file:///absolute/path/to/forecaster_skill/*'
+    @my_db.my_schema.skill_stage/skills/forecaster_skill/
+AUTO_COMPRESS = FALSE
+OVERWRITE = TRUE;
+```
+
+Every file in the directory is uploaded in a single `PUT`. Filenames on the stage exactly
+match the local filenames — no suffix is appended.
+
+### Wiring a skill to an agent
+
+Use the `cortex_skill_path()` macro with `ref()` to wire a skill to an agent. This both
+registers the DAG dependency (so the skill file is deployed before the agent is created) and
+derives the correct stage path from the skill model's `stage` config automatically — no
+hard-coded paths or variables needed:
+
+`models/my_agent.sql`:
+
+```sql
+{{
+  config(materialized = 'cortex_agent')
+}}
+models:
+  orchestration: claude-4-sonnet
+instructions:
+  response: "Be concise."
+  orchestration: "Use the forecaster skill to answer forecasting questions."
+skills:
+  - name: forecaster
+    source:
+      type: STAGE
+      path: "{{ dbt_cortex_agent.cortex_skill_path(ref('forecaster_skill')) }}"
+```
+
+`dbt build` will deploy `forecaster_skill` first (writing `SKILL.md` to the stage), then create
+or replace the agent with the resolved path in the spec.
+
+### `cortex_skill` configuration reference
+
+| Config  | Required | Type   | Description |
+|---------|----------|--------|-------------|
+| `stage` | Yes      | string | Fully-qualified stage path, e.g. `@my_db.my_schema.skill_stage`. |
+
+Standard dbt configs (`database`, `schema`, `alias`, `tags`, `pre_hook`, `post_hook`, …) work
+as usual. The model `alias` becomes the skill folder name on the stage.
+
+> **Notes.**
+> - The stage is created automatically with `CREATE STAGE IF NOT EXISTS` if it does not already exist.
+> - The `SKILL.md` content must not contain `$$` (used as the SQL dollar-quote delimiter internally).
+> - To remove a deployed skill file, run `REMOVE @<stage>/skills/<name>/SKILL.md` in Snowflake directly.
+
+---
+
+## `cortex_agent` configuration reference
 
 | Config      | Mode            | Type           | Description |
 |-------------|-----------------|----------------|-------------|
@@ -165,7 +260,10 @@ in the model's target database/schema with the model's `alias` as its name.
 
 ## How it works
 
-- **Materialization** (`macros/materializations/cortex_agent.sql`) — sets the
+- **`cortex_skill` materialization** (`macros/materializations/cortex_skill.sql`) — runs
+  pre-hooks, creates the stage if needed, issues `PUT 'file://dir/*' @stage/skills/<name>/`
+  to upload all skill files, runs post-hooks, and returns the relation.
+- **`cortex_agent` materialization** (`macros/materializations/cortex_agent.sql`) — sets the
   query tag, runs pre-hooks, issues a single `CREATE OR REPLACE AGENT`
   statement, runs post-hooks, and returns the relation.
 - **DDL builder** (`macros/relations/cortex_agent/create.sql`) — constructs the
