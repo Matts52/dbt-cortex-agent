@@ -32,15 +32,31 @@ Currently, as Cortex Agents are only available on the Snowflake adapter, this pa
 
 ## Installation
 
+### From dbt Hub (recommended)
+
 Add the package to your project's `packages.yml`:
 
 ```yaml
 packages:
-  - git: "https://github.com/Matts52/dbt-cortex-agent.git"
-    revision: 0.1.0
+  - package: Matts52/dbt_cortex_agent
+    version: 1.0.0
 ```
 
 Then install:
+
+```bash
+dbt deps
+```
+
+### From GitHub
+
+Alternatively, install directly from GitHub:
+
+```yaml
+packages:
+  - git: "https://github.com/Matts52/dbt-cortex-agent.git"
+    revision: 1.0.0
+```
 
 ```bash
 dbt deps
