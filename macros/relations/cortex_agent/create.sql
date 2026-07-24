@@ -62,6 +62,12 @@
 
     {%- set comment = config.get('comment', default=none) -%}
     {%- set profile = config.get('profile', default=none) -%}
+    {%- set web_search_tool = config.get('web_search_tool', default=false) -%}
+
+    {%- set tools_list = [] -%}
+    {%- if web_search_tool -%}
+      {%- do tools_list.append("{ TYPE = WEB_SEARCH_TOOL, NAME = 'web_search' }") -%}
+    {%- endif -%}
 
     create or replace agent {{ relation }}
     {%- if comment is not none %}
@@ -69,6 +75,11 @@
     {%- endif %}
     {%- if profile is not none %}
     profile = {{ dbt_cortex_agent.cortex_agent_render_profile(profile) }}
+    {%- endif %}
+    {%- if tools_list | length > 0 %}
+    tools = (
+      {{ tools_list | join(',\n      ') }}
+    )
     {%- endif %}
     from specification
 $${{ '\n' }}{{ sql }}{{ '\n' }}$$
