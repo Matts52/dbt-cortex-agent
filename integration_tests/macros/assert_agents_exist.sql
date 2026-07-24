@@ -13,7 +13,7 @@
 -#}
 {% macro assert_agents_exist() %}
   {%- if execute -%}
-    {%- set expected = ['agent_minimal', 'agent_with_semantic_view', 'agent_raw_ddl', 'agent_with_skill'] -%}
+    {%- set expected = ['agent_minimal', 'agent_with_semantic_view', 'agent_raw_ddl', 'agent_with_skill', 'agent_with_web_search'] -%}
     {%- for model_name in expected -%}
       {%- set rel = ref(model_name) -%}
       {%- do run_query("show agents like '" ~ rel.identifier ~ "' in schema " ~ rel.database ~ "." ~ rel.schema) -%}

@@ -126,6 +126,40 @@ $$
 > managed elsewhere in your project. This makes the agent a proper downstream
 > node in your lineage graph.
 
+### Enabling web search
+
+Add `web_search_tool = true` to the config block to give the agent access to
+Snowflake's built-in web search capability:
+
+```sql
+{{
+  config(
+    materialized    = 'cortex_agent',
+    web_search_tool = true
+  )
+}}
+models:
+  orchestration: claude-4-sonnet
+instructions:
+  response: "Be concise."
+  orchestration: "Use web search to answer questions about current events."
+```
+
+This emits a DDL-level `TOOLS` clause before `FROM SPECIFICATION`:
+
+```sql
+create or replace agent MY_DB.MY_SCHEMA.MY_AGENT
+tools = (
+  { TYPE = WEB_SEARCH_TOOL, NAME = 'web_search' }
+)
+from specification
+$$
+...
+$$
+```
+
+Omitting the config key (or setting it to `false`) produces no `TOOLS` clause.
+
 ### 2. Raw DDL mode (`raw_ddl=true`)
 
 The body is **everything that follows `CREATE OR REPLACE AGENT <name>`** — a
@@ -246,11 +280,12 @@ as usual. The model `alias` becomes the skill folder name on the stage.
 
 ## `cortex_agent` configuration reference
 
-| Config      | Mode            | Type           | Description |
-|-------------|-----------------|----------------|-------------|
-| `comment`   | specification   | string         | Sets the agent-level `COMMENT` clause. Single quotes are escaped automatically. |
-| `profile`   | specification   | dict or string | Sets the `PROFILE` clause. A dict is serialized to JSON for you (`display_name`, `avatar`, `color`); a string is used verbatim. |
-| `raw_ddl`   | both            | bool (default `false`) | When `true`, the model body is treated as raw DDL appended after `CREATE OR REPLACE AGENT <name>`, and `comment` / `profile` configs are ignored. |
+| Config            | Mode            | Type           | Description |
+|-------------------|-----------------|----------------|-------------|
+| `comment`         | specification   | string         | Sets the agent-level `COMMENT` clause. Single quotes are escaped automatically. |
+| `profile`         | specification   | dict or string | Sets the `PROFILE` clause. A dict is serialized to JSON for you (`display_name`, `avatar`, `color`); a string is used verbatim. |
+| `web_search_tool` | specification   | bool (default `false`) | When `true`, adds `{ TYPE = WEB_SEARCH_TOOL, NAME = 'web_search' }` to the DDL-level `TOOLS = (...)` clause, enabling live web search for the agent. |
+| `raw_ddl`         | both            | bool (default `false`) | When `true`, the model body is treated as raw DDL appended after `CREATE OR REPLACE AGENT <name>`, and `comment` / `profile` / `web_search_tool` configs are ignored. |
 
 Standard dbt configs (`database`, `schema`, `alias`, `tags`, `pre_hook`,
 `post_hook`, `grants`, `enabled`, …) all work as usual. The agent is created
