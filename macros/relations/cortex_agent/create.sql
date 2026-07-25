@@ -55,6 +55,10 @@
 
   {%- if raw_ddl -%}
 
+    {%- if config.get('web_search_tool', default=false) or config.get('comment', default=none) is not none or config.get('profile', default=none) is not none -%}
+      {{ exceptions.warn("cortex_agent: web_search_tool, comment, and profile configs are ignored when raw_ddl=true. Add these directly to your DDL body.") }}
+    {%- endif -%}
+
     create or replace agent {{ relation }}
     {{ sql }}
 
@@ -64,9 +68,8 @@
     {%- set profile = config.get('profile', default=none) -%}
     {%- set web_search_tool = config.get('web_search_tool', default=false) -%}
 
-    {%- set tools_list = [] -%}
     {%- if web_search_tool -%}
-      {%- do tools_list.append("{ TYPE = WEB_SEARCH_TOOL, NAME = 'web_search' }") -%}
+      {%- set sql = sql ~ '\ntools:\n  - tool_spec:\n      type: "web_search"\n      name: "web_search"\n' -%}
     {%- endif -%}
 
     create or replace agent {{ relation }}
@@ -75,11 +78,6 @@
     {%- endif %}
     {%- if profile is not none %}
     profile = {{ dbt_cortex_agent.cortex_agent_render_profile(profile) }}
-    {%- endif %}
-    {%- if tools_list | length > 0 %}
-    tools = (
-      {{ tools_list | join(',\n      ') }}
-    )
     {%- endif %}
     from specification
 $${{ '\n' }}{{ sql }}{{ '\n' }}$$

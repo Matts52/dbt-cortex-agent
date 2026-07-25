@@ -161,20 +161,23 @@ instructions:
   orchestration: "Use web search to answer questions about current events."
 ```
 
-This emits a DDL-level `TOOLS` clause before `FROM SPECIFICATION`:
+This injects a `tool_spec` entry into the agent specification YAML:
 
 ```sql
 create or replace agent MY_DB.MY_SCHEMA.MY_AGENT
-tools = (
-  { TYPE = WEB_SEARCH_TOOL, NAME = 'web_search' }
-)
 from specification
 $$
 ...
+tools:
+  - tool_spec:
+      type: "web_search"
+      name: "web_search"
 $$
 ```
 
-Omitting the config key (or setting it to `false`) produces no `TOOLS` clause.
+Omitting the config key (or setting it to `false`) produces no `tools` entry.
+
+> **Note:** If your spec already contains a `tools:` block (e.g. for `cortex_search` or `cortex_analyst_text_to_sql`), set `web_search_tool = false` and add the entry directly in your spec's `tools:` list to avoid a duplicate key.
 
 ### 2. Raw DDL mode (`raw_ddl=true`)
 
@@ -182,6 +185,17 @@ The body is **everything that follows `CREATE OR REPLACE AGENT <name>`** — a
 direct pass-through to Snowflake. Use this when you want to control the exact
 clause ordering or adopt new `CREATE AGENT` syntax before the package models
 it.
+
+> **Note:** The `comment`, `profile`, and `web_search_tool` configs are silently
+> ignored in raw DDL mode — a compile-time warning is emitted if any of them are
+> set alongside `raw_ddl=true`. Add web search support directly in the spec's
+> `tools:` list:
+> ```yaml
+> tools:
+>   - tool_spec:
+>       type: "web_search"
+>       name: "web_search"
+> ```
 
 `models/raw_agent.sql`:
 
@@ -300,8 +314,8 @@ as usual. The model `alias` becomes the skill folder name on the stage.
 |-------------------|-----------------|----------------|-------------|
 | `comment`         | specification   | string         | Sets the agent-level `COMMENT` clause. Single quotes are escaped automatically. |
 | `profile`         | specification   | dict or string | Sets the `PROFILE` clause. A dict is serialized to JSON for you (`display_name`, `avatar`, `color`); a string is used verbatim. |
-| `web_search_tool` | specification   | bool (default `false`) | When `true`, adds `{ TYPE = WEB_SEARCH_TOOL, NAME = 'web_search' }` to the DDL-level `TOOLS = (...)` clause, enabling live web search for the agent. |
-| `raw_ddl`         | both            | bool (default `false`) | When `true`, the model body is treated as raw DDL appended after `CREATE OR REPLACE AGENT <name>`, and `comment` / `profile` / `web_search_tool` configs are ignored. |
+| `web_search_tool` | specification   | bool (default `false`) | When `true`, injects a `tool_spec` entry for web search into the agent specification YAML, enabling live web search for the agent. If your spec already has a `tools:` block, add the entry there directly instead. |
+| `raw_ddl`         | both            | bool (default `false`) | When `true`, the model body is treated as raw DDL appended after `CREATE OR REPLACE AGENT <name>`, and `comment` / `profile` / `web_search_tool` configs are ignored (a compile-time warning is emitted if any of these are set). |
 
 Standard dbt configs (`database`, `schema`, `alias`, `tags`, `pre_hook`,
 `post_hook`, `grants`, `enabled`, …) all work as usual. The agent is created
