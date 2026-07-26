@@ -32,3 +32,6 @@ models:
 
   - name: agent_with_skill
     description: "Cortex Agent that references forecaster_skill via the skills array; depends_on ensures the skill file is deployed first."
+
+  - name: agent_versioned
+    description: "Cortex Agent with versioning=true. Compiles to CREATE AGENT IF NOT EXISTS ... ADD VERSION DDL. Compile-path test only."

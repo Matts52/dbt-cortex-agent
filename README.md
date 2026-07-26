@@ -212,6 +212,64 @@ instructions:
 $$
 ```
 
+### 3. Versioned publish / canary rollout (`versioning=true`)
+
+By default, every `dbt run` issues `CREATE OR REPLACE AGENT` — the new spec is live the instant the run finishes, with no version history and no rollback path.
+
+Set `versioning=true` to opt into named-version DDL instead. The package tracks whether the agent already exists and issues the appropriate DDL:
+
+- **First run (agent absent):** `CREATE AGENT IF NOT EXISTS ... ADD VERSION '<name>' FROM SPECIFICATION $$...$$`
+- **Subsequent runs (agent present):** `ALTER AGENT ... ADD VERSION '<name>' FROM SPECIFICATION $$...$$`
+- **Promotion (when `set_default=true`, the default):** `ALTER AGENT ... SET DEFAULT_VERSION = '<name>'`
+
+#### Minimal example
+
+```sql
+{{
+  config(
+    materialized = 'cortex_agent',
+    versioning   = true
+  )
+}}
+models:
+  orchestration: claude-4-sonnet
+instructions:
+  response: "Be concise."
+```
+
+Each run auto-generates a version name from `run_started_at` in the format `v_YYYYMMDD_HHMMSS`. All models versioned in the same `dbt run` share one version name, so rolling back a full run is as simple as flipping the default pointer back to the previous timestamp name.
+
+#### Staging a canary version
+
+Deploy a new spec without affecting live traffic by setting `set_default=false`:
+
+```sql
+{{
+  config(
+    materialized = 'cortex_agent',
+    versioning   = true,
+    version_name = 'v_canary',
+    set_default  = false          -- create version but keep existing default live
+  )
+}}
+```
+
+After validating the canary out of band, promote it:
+
+```bash
+dbt run --select my_agent --vars '{"version_name": "v_canary", "set_default": true}'
+```
+
+#### Rollback
+
+Flip `DEFAULT VERSION` back to any prior version name by re-running with an explicit `version_name` and `set_default=true`:
+
+```bash
+dbt run --select my_agent --vars '{"version_name": "v_20250101_120000", "set_default": true}'
+```
+
+> **Note:** `versioning=true` is incompatible with `raw_ddl=true`. If both are set, a compile-time warning is emitted and the materialization falls back to `CREATE OR REPLACE` behavior. Use specification mode (`raw_ddl=false`) to enable versioning.
+
 ---
 
 ## Skills (`cortex_skill` materialization)
@@ -316,6 +374,9 @@ as usual. The model `alias` becomes the skill folder name on the stage.
 | `profile`         | specification   | dict or string | Sets the `PROFILE` clause. A dict is serialized to JSON for you (`display_name`, `avatar`, `color`); a string is used verbatim. |
 | `web_search_tool` | specification   | bool (default `false`) | When `true`, injects a `tool_spec` entry for web search into the agent specification YAML, enabling live web search for the agent. If your spec already has a `tools:` block, add the entry there directly instead. |
 | `raw_ddl`         | both            | bool (default `false`) | When `true`, the model body is treated as raw DDL appended after `CREATE OR REPLACE AGENT <name>`, and `comment` / `profile` / `web_search_tool` configs are ignored (a compile-time warning is emitted if any of these are set). |
+| `versioning`      | specification   | bool (default `false`) | Master switch for named-version mode. When `true`, uses `ADD VERSION` DDL instead of `CREATE OR REPLACE`. Incompatible with `raw_ddl=true` (a warning is emitted and the run falls back to `CREATE OR REPLACE`). |
+| `version_name`    | specification (versioning=true) | string | Name of the version to create. When omitted, auto-generated as `v_YYYYMMDD_HHMMSS` from `run_started_at` — deterministic within a run and safe as a Snowflake identifier. |
+| `set_default`     | specification (versioning=true) | bool (default `true`) | When `true`, flips the agent's `DEFAULT VERSION` to this version after creating it. Set `false` to create a staging/canary version without affecting live traffic. |
 
 Standard dbt configs (`database`, `schema`, `alias`, `tags`, `pre_hook`,
 `post_hook`, `grants`, `enabled`, …) all work as usual. The agent is created
