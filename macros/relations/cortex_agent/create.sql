@@ -55,8 +55,8 @@
 
   {%- if raw_ddl -%}
 
-    {%- if config.get('web_search_tool', default=false) or config.get('comment', default=none) is not none or config.get('profile', default=none) is not none -%}
-      {{ exceptions.warn("cortex_agent: web_search_tool, comment, and profile configs are ignored when raw_ddl=true. Add these directly to your DDL body.") }}
+    {%- if config.get('web_search_tool', default=false) or config.get('comment', default=none) is not none or config.get('profile', default=none) is not none or config.get('model', default=none) is not none or config.get('budget', default=none) is not none -%}
+      {{ exceptions.warn("cortex_agent: web_search_tool, comment, profile, model, and budget configs are ignored when raw_ddl=true. Add these directly to your DDL body.") }}
     {%- endif -%}
 
     create or replace agent {{ relation }}
@@ -67,6 +67,15 @@
     {%- set comment = config.get('comment', default=none) -%}
     {%- set profile = config.get('profile', default=none) -%}
     {%- set web_search_tool = config.get('web_search_tool', default=false) -%}
+    {%- set model  = config.get('model',  default=none) -%}
+    {%- set budget = config.get('budget', default=none) -%}
+
+    {%- if model is not none and '\nmodels:' in ('\n' ~ sql) -%}
+      {{ exceptions.warn("cortex_agent: 'model' config is set but the spec body also appears to contain a top-level 'models:' key. The config-injected value will be ignored by most YAML parsers. Remove 'models:' from the spec body or unset the 'model' config.") }}
+    {%- endif -%}
+    {%- if budget is not none and '\norchestration:' in ('\n' ~ sql) -%}
+      {{ exceptions.warn("cortex_agent: 'budget' config is set but the spec body also appears to contain a top-level 'orchestration:' key. The config-injected value will be ignored by most YAML parsers. Remove 'orchestration:' from the spec body or unset the 'budget' config.") }}
+    {%- endif -%}
 
     {%- if web_search_tool -%}
       {%- set sql = sql ~ '\ntools:\n  - tool_spec:\n      type: "web_search"\n      name: "web_search"\n' -%}
@@ -80,7 +89,7 @@
     profile = {{ dbt_cortex_agent.cortex_agent_render_profile(profile) }}
     {%- endif %}
     from specification
-$${{ '\n' }}{{ sql }}{{ '\n' }}$$
+$${{ '\n' }}{{ dbt_cortex_agent.cortex_agent_render_model_and_budget(model, budget) }}{{ sql }}{{ '\n' }}$$
 
   {%- endif -%}
 
@@ -93,6 +102,36 @@ $${{ '\n' }}{{ sql }}{{ '\n' }}$$
 --  any embedded single quotes so the literal stays well-formed.
 -#}
   {{- "'" ~ (value | string | replace("'", "''")) ~ "'" -}}
+{%- endmacro %}
+
+
+{% macro cortex_agent_render_model_and_budget(model, budget) -%}
+{#-
+--  Render the `models:` and `orchestration:` YAML blocks that are prepended
+--  to the spec body when the `model` and/or `budget` configs are set.
+--
+--  Args:
+--  - model:  string or none — value for `models.orchestration`
+--  - budget: int, float, or dict or none
+--      int/float → shorthand for {seconds: <value>}
+--      dict      → {seconds: ..., tokens: ...} (either key is optional)
+--
+--  Returns: a YAML fragment (possibly empty) ending with a newline when
+--  non-empty, so it can be concatenated directly before the spec body.
+-#}
+  {%- set lines = [] -%}
+  {%- if model is not none -%}
+    {%- do lines.append('models:') -%}
+    {%- do lines.append('  orchestration: ' ~ model) -%}
+  {%- endif -%}
+  {%- if budget is not none -%}
+    {%- set budget = {'seconds': budget} if (budget is not mapping) else budget -%}
+    {%- do lines.append('orchestration:') -%}
+    {%- do lines.append('  budget:') -%}
+    {%- if budget.seconds is defined -%}{%- do lines.append('    seconds: ' ~ budget.seconds) -%}{%- endif -%}
+    {%- if budget.tokens  is defined -%}{%- do lines.append('    tokens: '  ~ budget.tokens)  -%}{%- endif -%}
+  {%- endif -%}
+  {{- (lines | join('\n')) ~ ('\n' if lines else '') -}}
 {%- endmacro %}
 
 
