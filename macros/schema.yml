@@ -14,8 +14,9 @@ macros:
       modes controlled by the `raw_ddl` model config:
 
       - Specification mode (default, `raw_ddl=false`): wraps the model body in
-        `FROM SPECIFICATION $$ ... $$` and emits the optional `COMMENT` and
-        `PROFILE` clauses from config.
+        `FROM SPECIFICATION $$ ... $$`, emits the optional `COMMENT` and
+        `PROFILE` clauses from config, and prepends any `model` / `budget`
+        config values as YAML inside the spec body.
 
       - Raw DDL mode (`raw_ddl=true`): treats the model body as everything
         following `CREATE OR REPLACE AGENT <name>` and passes it through
@@ -126,6 +127,25 @@ macros:
       - name: value
         type: string
         description: 'The value to quote. Example: "Sales assistant"'
+
+  - name: cortex_agent_render_model_and_budget
+    description: >
+      Renders the `models:` and `orchestration:` YAML blocks that are prepended
+      to the spec body when the `model` and/or `budget` materialization configs
+      are set. Returns an empty string when both inputs are none, so it is safe
+      to call unconditionally.
+    arguments:
+      - name: model
+        type: string or none
+        description: >
+          The orchestration model name, e.g. 'claude-opus-4'. Produces
+          `models:\n  orchestration: <value>` in the spec YAML.
+      - name: budget
+        type: int, float, dict, or none
+        description: >
+          Spending limit for the orchestrator. A plain number is shorthand for
+          {seconds: <value>}. A dict may contain `seconds` and/or `tokens` keys.
+          Produces an `orchestration:\n  budget:` block in the spec YAML.
 
   - name: cortex_agent_render_profile
     description: >
