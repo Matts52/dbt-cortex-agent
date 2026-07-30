@@ -42,6 +42,9 @@
 --  works on any adapter (e.g. DuckDB) and the compiled SQL is inspectable in
 --  target/compiled/. Attempting `dbt run` with a non-Snowflake adapter will
 --  succeed in compiling but issue DDL that the adapter cannot execute.
+--
+--  When versioning=true, always renders the CREATE AGENT IF NOT EXISTS ...
+--  ADD VERSION form (existence cannot be checked without a live DB).
 -#}
 {% materialization cortex_agent, default -%}
 
@@ -50,9 +53,27 @@
         identifier=identifier, schema=schema, database=database,
         type='view') -%}
 
-    {% call statement('main') -%}
-        {{ dbt_cortex_agent.snowflake__get_create_cortex_agent_sql(target_relation, sql) }}
-    {%- endcall %}
+    {%- set versioning = config.get('versioning', default=false) -%}
+    {%- set raw_ddl    = config.get('raw_ddl', default=false) -%}
+
+    {%- if versioning and not raw_ddl -%}
+
+      {%- set version_name = config.get('version_name', default=none) -%}
+      {%- if version_name is none -%}
+        {%- set version_name = dbt_cortex_agent._cortex_agent_auto_version_name() -%}
+      {%- endif -%}
+
+      {% call statement('main') -%}
+          {{ dbt_cortex_agent.snowflake__get_create_agent_with_version_sql(target_relation, version_name, sql) }}
+      {%- endcall %}
+
+    {%- else -%}
+
+      {% call statement('main') -%}
+          {{ dbt_cortex_agent.snowflake__get_create_cortex_agent_sql(target_relation, sql) }}
+      {%- endcall %}
+
+    {%- endif -%}
 
     {% do return({'relations': [target_relation]}) %}
 

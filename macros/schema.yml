@@ -158,3 +158,51 @@ macros:
         description: >
           Agent profile configuration. Example as dict:
           {'display_name': 'Sales Assistant', 'avatar': 'icon.png', 'color': 'blue'}
+
+  - name: snowflake__get_create_agent_with_version_sql
+    description: >
+      Produces CREATE AGENT IF NOT EXISTS ... ADD VERSION ... FROM SPECIFICATION
+      DDL for a new agent with a named first version. Used internally by the
+      versioning path when the agent does not yet exist.
+      SYNTAX SUBJECT TO VERIFICATION against live Snowflake Cortex Agent docs.
+    arguments:
+      - name: relation
+        type: SnowflakeRelation or string
+        description: The fully-qualified agent name.
+      - name: version_name
+        type: string
+        description: The name of the first version to create.
+      - name: sql
+        type: string
+        description: The compiled specification YAML body.
+
+  - name: snowflake__get_alter_agent_add_version_sql
+    description: >
+      Produces ALTER AGENT ... ADD VERSION ... FROM SPECIFICATION DDL for adding
+      a named version to an existing agent. Used internally by the versioning
+      path when the agent already exists. Note: COMMENT and PROFILE are omitted
+      as they are agent-level attributes set at creation time.
+      SYNTAX SUBJECT TO VERIFICATION against live Snowflake Cortex Agent docs.
+    arguments:
+      - name: relation
+        type: SnowflakeRelation or string
+        description: The fully-qualified agent name.
+      - name: version_name
+        type: string
+        description: The name of the version to add.
+      - name: sql
+        type: string
+        description: The compiled specification YAML body.
+
+  - name: snowflake__get_set_agent_default_version_sql
+    description: >
+      Produces ALTER AGENT ... SET DEFAULT_VERSION = ... DDL to flip which
+      version handles live traffic. Called when set_default=true (the default).
+      SYNTAX SUBJECT TO VERIFICATION against live Snowflake Cortex Agent docs.
+    arguments:
+      - name: relation
+        type: SnowflakeRelation or string
+        description: The fully-qualified agent name.
+      - name: version_name
+        type: string
+        description: The version to promote to default.
