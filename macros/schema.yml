@@ -23,7 +23,7 @@ macros:
         verbatim to Snowflake.
     arguments:
       - name: relation
-        type: SnowflakeRelation or string
+        type: string
         description: The fully-qualified agent name used in the DDL.
       - name: sql
         type: string
@@ -34,7 +34,7 @@ macros:
       Returns the `DROP AGENT IF EXISTS` DDL string for the given relation.
     arguments:
       - name: relation
-        type: SnowflakeRelation
+        type: string
         description: The agent relation to drop.
 
   - name: snowflake__get_cortex_agent_rename_sql
@@ -42,10 +42,10 @@ macros:
       Returns the `ALTER AGENT ... RENAME TO` DDL string.
     arguments:
       - name: relation
-        type: SnowflakeRelation
+        type: string
         description: The agent relation to rename.
       - name: new_name
-        type: SnowflakeRelation or string
+        type: string
         description: The new name for the agent.
 
   - name: cortex_skill__resolve_skill_dir
@@ -72,7 +72,7 @@ macros:
       the suffix that COPY INTO appends to output files.
     arguments:
       - name: relation
-        type: SnowflakeRelation or string
+        type: string
         description: The relation representing this skill node (used for context).
       - name: skill_dir
         type: string
@@ -93,7 +93,7 @@ macros:
       execute=True context; returns a placeholder during parse time.
     arguments:
       - name: skill_ref
-        type: Relation
+        type: string
         description: >
           The Relation returned by ref() for the cortex_skill model, e.g.
           ref('forecaster_skill').
@@ -104,7 +104,7 @@ macros:
       skill's file, run REMOVE @<stage>/skills/<name>/SKILL.md manually.
     arguments:
       - name: relation
-        type: SnowflakeRelation
+        type: string
         description: The skill relation to drop (unused).
 
   - name: snowflake__get_cortex_skill_rename_sql
@@ -113,10 +113,10 @@ macros:
       executed manually on the stage.
     arguments:
       - name: relation
-        type: SnowflakeRelation
+        type: string
         description: The skill relation to rename (unused).
       - name: new_name
-        type: SnowflakeRelation or string
+        type: string
         description: The new name (unused).
 
   - name: cortex_agent_quote_string
@@ -136,12 +136,12 @@ macros:
       to call unconditionally.
     arguments:
       - name: model
-        type: string or none
+        type: string
         description: >
           The orchestration model name, e.g. 'claude-opus-4'. Produces
           `models:\n  orchestration: <value>` in the spec YAML.
       - name: budget
-        type: int, float, dict, or none
+        type: any
         description: >
           Spending limit for the orchestrator. A plain number is shorthand for
           {seconds: <value>}. A dict may contain `seconds` and/or `tokens` keys.
@@ -154,7 +154,7 @@ macros:
       string literal suitable for use in `PROFILE = ...`.
     arguments:
       - name: profile
-        type: dict or string
+        type: string
         description: >
           Agent profile configuration. Example as dict:
           {'display_name': 'Sales Assistant', 'avatar': 'icon.png', 'color': 'blue'}
@@ -167,7 +167,7 @@ macros:
       SYNTAX SUBJECT TO VERIFICATION against live Snowflake Cortex Agent docs.
     arguments:
       - name: relation
-        type: SnowflakeRelation or string
+        type: string
         description: The fully-qualified agent name.
       - name: version_name
         type: string
@@ -185,7 +185,7 @@ macros:
       SYNTAX SUBJECT TO VERIFICATION against live Snowflake Cortex Agent docs.
     arguments:
       - name: relation
-        type: SnowflakeRelation or string
+        type: string
         description: The fully-qualified agent name.
       - name: version_name
         type: string
@@ -201,7 +201,7 @@ macros:
       SYNTAX SUBJECT TO VERIFICATION against live Snowflake Cortex Agent docs.
     arguments:
       - name: relation
-        type: SnowflakeRelation or string
+        type: string
         description: The fully-qualified agent name.
       - name: version_name
         type: string
