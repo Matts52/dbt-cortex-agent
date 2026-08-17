@@ -35,3 +35,9 @@ models:
 
   - name: agent_versioned
     description: "Cortex Agent with versioning=true. Compiles to CREATE AGENT IF NOT EXISTS ... ADD VERSION DDL. Compile-path test only."
+
+  - name: atlassian_mcp_server
+    description: "External MCP Server object for the Atlassian (Jira & Confluence) MCP endpoint. Created by the cortex_mcp_server materialization."
+
+  - name: agent_with_mcp_server
+    description: "Cortex Agent that references atlassian_mcp_server via cortex_mcp_server_name(ref(...)). Verifies DAG wiring and mcp_servers: spec injection."
