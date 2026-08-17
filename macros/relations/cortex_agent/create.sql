@@ -114,8 +114,8 @@
 
   {%- if raw_ddl -%}
 
-    {%- if config.get('web_search_tool', default=false) or config.get('comment', default=none) is not none or config.get('profile', default=none) is not none or config.get('model', default=none) is not none or config.get('budget', default=none) is not none -%}
-      {{ exceptions.warn("cortex_agent: web_search_tool, comment, profile, model, and budget configs are ignored when raw_ddl=true. Add these directly to your DDL body.") }}
+    {%- if config.get('web_search_tool', default=false) or config.get('comment', default=none) is not none or config.get('profile', default=none) is not none or config.get('model', default=none) is not none or config.get('budget', default=none) is not none or config.get('mcp_servers', default=[]) | length > 0 -%}
+      {{ exceptions.warn("cortex_agent: web_search_tool, comment, profile, model, budget, and mcp_servers configs are ignored when raw_ddl=true. Add these directly to your DDL body.") }}
     {%- endif -%}
 
     create or replace agent {{ relation }}
@@ -128,6 +128,7 @@
     {%- set web_search_tool = config.get('web_search_tool', default=false) -%}
     {%- set model  = config.get('model',  default=none) -%}
     {%- set budget = config.get('budget', default=none) -%}
+    {%- set mcp_servers = config.get('mcp_servers', default=[]) -%}
 
     {%- if model is not none and '\nmodels:' in ('\n' ~ sql) -%}
       {{ exceptions.warn("cortex_agent: 'model' config is set but the spec body also appears to contain a top-level 'models:' key. The config-injected value will be ignored by most YAML parsers. Remove 'models:' from the spec body or unset the 'model' config.") }}
@@ -135,9 +136,20 @@
     {%- if budget is not none and '\norchestration:' in ('\n' ~ sql) -%}
       {{ exceptions.warn("cortex_agent: 'budget' config is set but the spec body also appears to contain a top-level 'orchestration:' key. The config-injected value will be ignored by most YAML parsers. Remove 'orchestration:' from the spec body or unset the 'budget' config.") }}
     {%- endif -%}
+    {%- if mcp_servers | length > 0 and '\nmcp_servers:' in ('\n' ~ sql) -%}
+      {{ exceptions.warn("cortex_agent: 'mcp_servers' config is set but the spec body also appears to contain a top-level 'mcp_servers:' key. The config-injected block will conflict. Remove 'mcp_servers:' from the spec body or unset the 'mcp_servers' config.") }}
+    {%- endif -%}
 
     {%- if web_search_tool -%}
       {%- set sql = sql ~ '\ntools:\n  - tool_spec:\n      type: "web_search"\n      name: "web_search"\n' -%}
+    {%- endif -%}
+
+    {%- if mcp_servers | length > 0 -%}
+      {%- set mcp_block = '\nmcp_servers:\n' -%}
+      {%- for server in mcp_servers -%}
+        {%- set mcp_block = mcp_block ~ '  - server_spec:\n      name: "' ~ server ~ '"\n' -%}
+      {%- endfor -%}
+      {%- set sql = sql ~ mcp_block -%}
     {%- endif -%}
 
     create or replace agent {{ relation }}
@@ -178,9 +190,18 @@ $${{ '\n' }}{{ dbt_cortex_agent.cortex_agent_render_model_and_budget(model, budg
   {%- set comment        = config.get('comment', default=none) -%}
   {%- set profile        = config.get('profile', default=none) -%}
   {%- set web_search_tool = config.get('web_search_tool', default=false) -%}
+  {%- set mcp_servers    = config.get('mcp_servers', default=[]) -%}
 
   {%- if web_search_tool -%}
     {%- set sql = sql ~ '\ntools:\n  - tool_spec:\n      type: "web_search"\n      name: "web_search"\n' -%}
+  {%- endif -%}
+
+  {%- if mcp_servers | length > 0 -%}
+    {%- set mcp_block = '\nmcp_servers:\n' -%}
+    {%- for server in mcp_servers -%}
+      {%- set mcp_block = mcp_block ~ '  - server_spec:\n      name: "' ~ server ~ '"\n' -%}
+    {%- endfor -%}
+    {%- set sql = sql ~ mcp_block -%}
   {%- endif -%}
 
   create agent if not exists {{ relation }}
@@ -220,9 +241,18 @@ $${{ '\n' }}{{ sql }}{{ '\n' }}$$
 -#}
 
   {%- set web_search_tool = config.get('web_search_tool', default=false) -%}
+  {%- set mcp_servers    = config.get('mcp_servers', default=[]) -%}
 
   {%- if web_search_tool -%}
     {%- set sql = sql ~ '\ntools:\n  - tool_spec:\n      type: "web_search"\n      name: "web_search"\n' -%}
+  {%- endif -%}
+
+  {%- if mcp_servers | length > 0 -%}
+    {%- set mcp_block = '\nmcp_servers:\n' -%}
+    {%- for server in mcp_servers -%}
+      {%- set mcp_block = mcp_block ~ '  - server_spec:\n      name: "' ~ server ~ '"\n' -%}
+    {%- endfor -%}
+    {%- set sql = sql ~ mcp_block -%}
   {%- endif -%}
 
   alter agent {{ relation }}

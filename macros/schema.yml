@@ -206,3 +206,56 @@ macros:
       - name: version_name
         type: string
         description: The version to promote to default.
+
+  - name: snowflake__create_or_replace_cortex_mcp_server
+    description: >
+      Orchestrates CREATE EXTERNAL MCP SERVER DDL for a model using the
+      `cortex_mcp_server` materialization. Runs pre/post hooks around the main
+      statement. Called internally by the materialization — not intended for
+      direct use.
+
+  - name: snowflake__get_create_cortex_mcp_server_sql
+    description: >
+      Produces the CREATE EXTERNAL MCP SERVER DDL for the given relation.
+      Requires display_name, url, and api_integration configs on the model.
+      SYNTAX SUBJECT TO VERIFICATION against live Snowflake Cortex Agent docs.
+    arguments:
+      - name: relation
+        type: string
+        description: The fully-qualified MCP server name used in the DDL.
+
+  - name: cortex_mcp_server_name
+    description: >
+      Returns the fully-qualified dotted name (database.schema.name) for a
+      cortex_mcp_server model given its ref(), for use in a cortex_agent's
+      mcp_servers: section. Calling ref() as the argument registers the DAG
+      dependency so the agent is not created until the MCP server object exists.
+      Must be called inside an execute=True context; returns a placeholder
+      during parse time.
+    arguments:
+      - name: server_ref
+        type: string
+        description: >
+          The Relation returned by ref() for the cortex_mcp_server model, e.g.
+          ref('atlassian_mcp_server').
+
+  - name: snowflake__get_drop_cortex_mcp_server_sql
+    description: >
+      Returns the DROP EXTERNAL MCP SERVER IF EXISTS DDL string for the given
+      relation. SYNTAX SUBJECT TO VERIFICATION against live Snowflake docs.
+    arguments:
+      - name: relation
+        type: string
+        description: The MCP server relation to drop.
+
+  - name: snowflake__get_cortex_mcp_server_rename_sql
+    description: >
+      No-op. Renaming an External MCP Server via ALTER DDL is not supported.
+      To rename, drop and recreate with the new name.
+    arguments:
+      - name: relation
+        type: string
+        description: The MCP server relation to rename (unused).
+      - name: new_name
+        type: string
+        description: The new name (unused).
