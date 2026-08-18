@@ -366,6 +366,137 @@ as usual. The model `alias` becomes the skill folder name on the stage.
 
 ---
 
+---
+
+## `cortex_mcp_server` — External MCP servers
+
+The `cortex_mcp_server` materialization creates a Snowflake **External MCP Server**
+object (`CREATE EXTERNAL MCP SERVER`) from a config-only dbt model. Once created,
+the MCP server can be wired into a `cortex_agent` model with `ref()` so that the
+DAG enforces correct build order.
+
+### Bootstrap: create the API integration first
+
+An External MCP Server references a Snowflake **API INTEGRATION** object that
+authenticates Snowflake's outbound calls to the MCP endpoint. API integrations
+are account-level objects that require **ACCOUNTADMIN** (or **CREATE INTEGRATION**)
+privilege to create — they cannot be created by a typical dbt service account
+during `dbt build`.
+
+Run the `create_mcp_api_integration` operation **once per MCP endpoint** before
+`dbt build`, using an admin-privileged role:
+
+```bash
+# Dynamic Client Registration (recommended for DCR-capable providers, e.g. Atlassian):
+dbt run-operation create_mcp_api_integration --args '{
+  integration_name: jira_mcp_api_integration,
+  allowed_prefixes: ["https://mcp.atlassian.com"],
+  auth_type: OAUTH_DYNAMIC_CLIENT,
+  oauth_resource_url: "https://mcp.atlassian.com/v1/mcp"
+}'
+
+# OAuth2 client credentials (for providers without DCR):
+dbt run-operation create_mcp_api_integration --args '{
+  integration_name: my_mcp_api_integration,
+  allowed_prefixes: ["https://api.example.com/mcp"],
+  auth_type: OAUTH2,
+  oauth_client_id: "abc123",
+  oauth_client_secret: "s3cr3t",
+  oauth_token_endpoint: "https://api.example.com/oauth/token",
+  oauth_authorization_endpoint: "https://api.example.com/oauth/authorize"
+}'
+```
+
+Use `dry_run=true` to preview the DDL without executing it:
+
+```bash
+dbt run-operation create_mcp_api_integration --args '{
+  integration_name: jira_mcp_api_integration,
+  allowed_prefixes: ["https://mcp.atlassian.com"],
+  auth_type: OAUTH_DYNAMIC_CLIENT,
+  oauth_resource_url: "https://mcp.atlassian.com/v1/mcp",
+  dry_run: true
+}'
+```
+
+If the API integration does not exist when `dbt build` runs, the materialization
+will fail immediately with a clear error message that names the missing integration
+and shows the bootstrap command to run.
+
+### Defining an MCP server model
+
+The model body is empty — all parameters are supplied via `config()`:
+
+`models/atlassian_mcp_server.sql`:
+
+```sql
+{{
+  config(
+    materialized    = 'cortex_mcp_server',
+    display_name    = 'Atlassian (Jira & Confluence)',
+    url             = 'https://mcp.atlassian.com/v1/mcp',
+    api_integration = 'jira_mcp_api_integration'
+  )
+}}
+```
+
+### Wiring an MCP server to an agent
+
+Use the `cortex_mcp_server_name()` macro with `ref()` to wire the server into an
+agent model body. This both registers the DAG dependency (the agent will not be
+created until the MCP server object exists) and derives the correct
+`database.schema.name` automatically:
+
+`models/my_agent.sql`:
+
+```sql
+{{
+  config(materialized = 'cortex_agent')
+}}
+models:
+  orchestration: claude-4-sonnet
+instructions:
+  response: "Be concise."
+  orchestration: "Use the Atlassian MCP server for Jira and Confluence questions."
+mcp_servers:
+  - server_spec:
+      name: "{{ dbt_cortex_agent.cortex_mcp_server_name(ref('atlassian_mcp_server')) }}"
+```
+
+### `cortex_mcp_server` configuration reference
+
+| Config            | Required | Type   | Description |
+|-------------------|----------|--------|-------------|
+| `display_name`    | Yes      | string | Human-readable label shown in Snowflake. |
+| `url`             | Yes      | string | MCP server endpoint URL. |
+| `api_integration` | Yes      | string | Name of the pre-existing Snowflake API integration object. |
+
+### `create_mcp_api_integration` operation reference
+
+| Parameter                    | Required                    | Type         | Description |
+|------------------------------|-----------------------------|--------------|-------------|
+| `integration_name`           | Yes                         | string       | Snowflake object name for the API integration. |
+| `allowed_prefixes`           | Yes                         | list[string] | Base URL(s) of the MCP server, matched as a prefix. |
+| `auth_type`                  | No (default `OAUTH_DYNAMIC_CLIENT`) | string | `OAUTH_DYNAMIC_CLIENT` or `OAUTH2`. |
+| `oauth_resource_url`         | Yes (OAUTH_DYNAMIC_CLIENT)  | string       | MCP server URL used for DCR. |
+| `oauth_client_id`            | Yes (OAUTH2)                | string       | OAuth2 client ID. |
+| `oauth_client_secret`        | Yes (OAUTH2)                | string       | OAuth2 client secret. |
+| `oauth_token_endpoint`       | Yes (OAUTH2)                | string       | OAuth2 token endpoint URL. |
+| `oauth_authorization_endpoint` | Yes (OAUTH2)              | string       | OAuth2 authorization endpoint URL. |
+| `oauth_client_auth_method`   | No (OAUTH2 only)            | string       | `CLIENT_SECRET_BASIC` or `CLIENT_SECRET_POST`. |
+| `oauth_discovery_url`        | No (OAUTH2 only)            | string       | OIDC discovery URL. |
+| `oauth_refresh_token_validity` | No (OAUTH2 only)          | int          | Refresh token validity in seconds. |
+| `enabled`                    | No (default `true`)         | bool         | Whether the integration is enabled. |
+| `if_not_exists`              | No (default `false`)        | bool         | Use `IF NOT EXISTS` instead of `OR REPLACE`. |
+| `dry_run`                    | No (default `false`)        | bool         | Log DDL without executing. |
+| `comment`                    | No                          | string       | Optional `COMMENT` clause. |
+
+> **Privilege note.** `create_mcp_api_integration` requires **ACCOUNTADMIN** or the
+> **CREATE INTEGRATION** account-level privilege. This is a one-time admin operation;
+> normal dbt runs do not need elevated privileges once the integration exists.
+
+---
+
 ## `cortex_agent` configuration reference
 
 | Config            | Mode            | Type           | Description |
