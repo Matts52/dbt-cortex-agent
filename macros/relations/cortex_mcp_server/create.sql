@@ -1,3 +1,16 @@
+{% macro _mcp_api_integration_exists(integration_name) -%}
+{#-
+--  Returns true if the named API integration exists in Snowflake.
+--  Uses SHOW INTEGRATIONS + RESULT_SCAN (requires MONITOR USAGE or ACCOUNTADMIN).
+--  Returns true at parse time to avoid blocking compilation.
+-#}
+  {%- if not execute -%}{{ return(true) }}{%- endif -%}
+  {%- do run_query("show integrations like '" ~ integration_name ~ "'") -%}
+  {%- set results = run_query("select count(*) as n from table(result_scan(last_query_id()))") -%}
+  {{ return((results.columns[0].values()[0] | int) > 0) }}
+{%- endmacro %}
+
+
 {% macro snowflake__get_create_cortex_mcp_server_sql(relation) -%}
 {#-
 --  Produce the DDL that creates an External MCP Server object.
@@ -30,6 +43,22 @@
 --  Returns: {'relations': [target_relation]}
 -#}
   {%- set identifier = model['alias'] -%}
+  {%- set api_integration = config.require('api_integration') -%}
+
+  {%- if execute and not dbt_cortex_agent._mcp_api_integration_exists(api_integration) -%}
+    {{ exceptions.raise_compiler_error(
+        "\n\ncortex_mcp_server: API integration '" ~ api_integration ~ "' does not exist "
+        ~ "in Snowflake.\n\n"
+        ~ "Bootstrap it first (requires ACCOUNTADMIN or CREATE INTEGRATION privilege):\n\n"
+        ~ "    dbt run-operation create_mcp_api_integration --args '{\n"
+        ~ "      integration_name: " ~ api_integration ~ ",\n"
+        ~ "      allowed_prefixes: [\"<your-mcp-base-url>\"],\n"
+        ~ "      auth_type: OAUTH_DYNAMIC_CLIENT,\n"
+        ~ "      oauth_resource_url: \"<your-mcp-server-url>\"\n"
+        ~ "    }'\n\n"
+        ~ "See the README for full options including OAUTH2 (client credentials) mode."
+    ) }}
+  {%- endif -%}
 
   {%- set target_relation = api.Relation.create(
       identifier=identifier, schema=schema, database=database,
