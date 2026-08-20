@@ -8,7 +8,7 @@ macros:
       Internal helper — not intended for direct use.
     arguments:
       - name: relation
-        type: SnowflakeRelation
+        type: relation
         description: The agent relation to check.
 
   - name: _cortex_agent_auto_version_name
