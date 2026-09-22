@@ -1,7 +1,7 @@
 {{
   config(
     materialized = 'cortex_agent',
-    comment      = 'Agent with an MCP server wired via ref() for DAG lineage'
+    meta         = {'comment': 'Agent with an MCP server wired via ref() for DAG lineage'}
   )
 }}
 models:

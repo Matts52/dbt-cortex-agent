@@ -1,9 +1,11 @@
 {{
   config(
     materialized = 'cortex_agent',
-    versioning   = true,
-    set_default  = true,
-    comment      = 'Versioned integration-test agent'
+    meta         = {
+      'versioning':  true,
+      'set_default': true,
+      'comment':     'Versioned integration-test agent'
+    }
   )
 }}
 models:

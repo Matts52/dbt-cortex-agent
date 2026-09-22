@@ -16,8 +16,10 @@
       identifier=identifier, schema=schema, database=database,
       type='view') -%}
 
-  {%- set versioning = config.get('versioning', default=false) -%}
-  {%- set raw_ddl    = config.get('raw_ddl', default=false) -%}
+  {%- set _m = config.meta.get('versioning') -%}
+  {%- set versioning = _m if _m is not none else config.get('versioning', default=false) -%}
+  {%- set _m = config.meta.get('raw_ddl') -%}
+  {%- set raw_ddl    = _m if _m is not none else config.get('raw_ddl', default=false) -%}
 
   {{ run_hooks(pre_hooks) }}
 
@@ -33,11 +35,13 @@
 
     {%- else -%}
 
-      {%- set version_name = config.get('version_name', default=none) -%}
+      {%- set _m = config.meta.get('version_name') -%}
+      {%- set version_name = _m if _m is not none else config.get('version_name', default=none) -%}
       {%- if version_name is none -%}
         {%- set version_name = dbt_cortex_agent._cortex_agent_auto_version_name() -%}
       {%- endif -%}
-      {%- set set_default  = config.get('set_default', default=true) -%}
+      {%- set _m = config.meta.get('set_default') -%}
+      {%- set set_default  = _m if _m is not none else config.get('set_default', default=true) -%}
       {%- set agent_exists = dbt_cortex_agent._cortex_agent_exists(target_relation) -%}
 
       {%- if not agent_exists -%}
@@ -110,11 +114,24 @@
 --  Returns: a valid DDL statement that creates the agent.
 -#}
 
-  {%- set raw_ddl = config.get('raw_ddl', default=false) -%}
+  {%- set _m = config.meta.get('raw_ddl') -%}
+  {%- set raw_ddl = _m if _m is not none else config.get('raw_ddl', default=false) -%}
+  {%- set _m = config.meta.get('comment') -%}
+  {%- set comment = _m if _m is not none else config.get('comment', default=none) -%}
+  {%- set _m = config.meta.get('profile') -%}
+  {%- set profile = _m if _m is not none else config.get('profile', default=none) -%}
+  {%- set _m = config.meta.get('web_search_tool') -%}
+  {%- set web_search_tool = _m if _m is not none else config.get('web_search_tool', default=false) -%}
+  {%- set _m = config.meta.get('model') -%}
+  {%- set model = _m if _m is not none else config.get('model', default=none) -%}
+  {%- set _m = config.meta.get('budget') -%}
+  {%- set budget = _m if _m is not none else config.get('budget', default=none) -%}
+  {%- set _m = config.meta.get('mcp_servers') -%}
+  {%- set mcp_servers = _m if _m is not none else config.get('mcp_servers', default=[]) -%}
 
   {%- if raw_ddl -%}
 
-    {%- if config.get('web_search_tool', default=false) or config.get('comment', default=none) is not none or config.get('profile', default=none) is not none or config.get('model', default=none) is not none or config.get('budget', default=none) is not none or config.get('mcp_servers', default=[]) | length > 0 -%}
+    {%- if web_search_tool or comment is not none or profile is not none or model is not none or budget is not none or mcp_servers | length > 0 -%}
       {{ exceptions.warn("cortex_agent: web_search_tool, comment, profile, model, budget, and mcp_servers configs are ignored when raw_ddl=true. Add these directly to your DDL body.") }}
     {%- endif -%}
 
@@ -122,13 +139,6 @@
     {{ sql }}
 
   {%- else -%}
-
-    {%- set comment = config.get('comment', default=none) -%}
-    {%- set profile = config.get('profile', default=none) -%}
-    {%- set web_search_tool = config.get('web_search_tool', default=false) -%}
-    {%- set model  = config.get('model',  default=none) -%}
-    {%- set budget = config.get('budget', default=none) -%}
-    {%- set mcp_servers = config.get('mcp_servers', default=[]) -%}
 
     {%- if model is not none and '\nmodels:' in ('\n' ~ sql) -%}
       {{ exceptions.warn("cortex_agent: 'model' config is set but the spec body also appears to contain a top-level 'models:' key. The config-injected value will be ignored by most YAML parsers. Remove 'models:' from the spec body or unset the 'model' config.") }}
@@ -187,10 +197,14 @@ $${{ '\n' }}{{ dbt_cortex_agent.cortex_agent_render_model_and_budget(model, budg
 --  Returns: DDL string
 -#}
 
-  {%- set comment        = config.get('comment', default=none) -%}
-  {%- set profile        = config.get('profile', default=none) -%}
-  {%- set web_search_tool = config.get('web_search_tool', default=false) -%}
-  {%- set mcp_servers    = config.get('mcp_servers', default=[]) -%}
+  {%- set _m = config.meta.get('comment') -%}
+  {%- set comment        = _m if _m is not none else config.get('comment', default=none) -%}
+  {%- set _m = config.meta.get('profile') -%}
+  {%- set profile        = _m if _m is not none else config.get('profile', default=none) -%}
+  {%- set _m = config.meta.get('web_search_tool') -%}
+  {%- set web_search_tool = _m if _m is not none else config.get('web_search_tool', default=false) -%}
+  {%- set _m = config.meta.get('mcp_servers') -%}
+  {%- set mcp_servers    = _m if _m is not none else config.get('mcp_servers', default=[]) -%}
 
   {%- if web_search_tool -%}
     {%- set sql = sql ~ '\ntools:\n  - tool_spec:\n      type: "web_search"\n      name: "web_search"\n' -%}
@@ -240,8 +254,10 @@ $${{ '\n' }}{{ sql }}{{ '\n' }}$$
 --  Returns: DDL string
 -#}
 
-  {%- set web_search_tool = config.get('web_search_tool', default=false) -%}
-  {%- set mcp_servers    = config.get('mcp_servers', default=[]) -%}
+  {%- set _m = config.meta.get('web_search_tool') -%}
+  {%- set web_search_tool = _m if _m is not none else config.get('web_search_tool', default=false) -%}
+  {%- set _m = config.meta.get('mcp_servers') -%}
+  {%- set mcp_servers    = _m if _m is not none else config.get('mcp_servers', default=[]) -%}
 
   {%- if web_search_tool -%}
     {%- set sql = sql ~ '\ntools:\n  - tool_spec:\n      type: "web_search"\n      name: "web_search"\n' -%}

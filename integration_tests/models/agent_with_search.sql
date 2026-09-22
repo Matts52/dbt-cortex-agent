@@ -1,8 +1,10 @@
 {{
   config(
     materialized = 'cortex_agent',
-    comment      = 'Agent with a Cortex Search tool (compile-only: no live search service in test env)',
-    profile      = {'display_name': 'Search Agent', 'color': 'teal'}
+    meta         = {
+      'comment': 'Agent with a Cortex Search tool (compile-only: no live search service in test env)',
+      'profile': {'display_name': 'Search Agent', 'color': 'teal'}
+    }
   )
 }}
 models:

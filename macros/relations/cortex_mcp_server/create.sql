@@ -22,9 +22,12 @@
 --
 --  Returns: a valid DDL statement that creates the external MCP server.
 -#}
-  {%- set display_name    = config.require('display_name') -%}
-  {%- set url             = config.require('url') -%}
-  {%- set api_integration = config.require('api_integration') -%}
+  {%- set _m = config.meta.get('display_name') -%}
+  {%- set display_name    = _m if _m is not none else config.require('display_name') -%}
+  {%- set _m = config.meta.get('url') -%}
+  {%- set url             = _m if _m is not none else config.require('url') -%}
+  {%- set _m = config.meta.get('api_integration') -%}
+  {%- set api_integration = _m if _m is not none else config.require('api_integration') -%}
 
   create or replace external mcp server {{ relation }}
     with display_name = {{ dbt_cortex_agent.cortex_agent_quote_string(display_name) }}
@@ -43,7 +46,8 @@
 --  Returns: {'relations': [target_relation]}
 -#}
   {%- set identifier = model['alias'] -%}
-  {%- set api_integration = config.require('api_integration') -%}
+  {%- set _m = config.meta.get('api_integration') -%}
+  {%- set api_integration = _m if _m is not none else config.require('api_integration') -%}
 
   {%- if execute and not dbt_cortex_agent._mcp_api_integration_exists(api_integration) -%}
     {{ exceptions.raise_compiler_error(

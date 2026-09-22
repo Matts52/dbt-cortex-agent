@@ -1,11 +1,13 @@
 {{
   config(
     materialized = 'cortex_agent',
-    comment      = 'Agent wired to a dbt-managed semantic view',
-    profile      = {
-      'display_name': 'Orders Analyst',
-      'avatar': 'orders-icon.png',
-      'color': 'blue'
+    meta         = {
+      'comment': 'Agent wired to a dbt-managed semantic view',
+      'profile': {
+        'display_name': 'Orders Analyst',
+        'avatar': 'orders-icon.png',
+        'color': 'blue'
+      }
     }
   )
 }}
