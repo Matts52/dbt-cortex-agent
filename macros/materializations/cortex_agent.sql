@@ -53,14 +53,14 @@
         identifier=identifier, schema=schema, database=database,
         type='view') -%}
 
-    {%- set _m = config.meta.get('versioning') -%}
+    {%- set _m = config.get('meta', {}).get('versioning') -%}
     {%- set versioning = _m if _m is not none else config.get('versioning', default=false) -%}
-    {%- set _m = config.meta.get('raw_ddl') -%}
+    {%- set _m = config.get('meta', {}).get('raw_ddl') -%}
     {%- set raw_ddl    = _m if _m is not none else config.get('raw_ddl', default=false) -%}
 
     {%- if versioning and not raw_ddl -%}
 
-      {%- set _m = config.meta.get('version_name') -%}
+      {%- set _m = config.get('meta', {}).get('version_name') -%}
       {%- set version_name = _m if _m is not none else config.get('version_name', default=none) -%}
       {%- if version_name is none -%}
         {%- set version_name = dbt_cortex_agent._cortex_agent_auto_version_name() -%}
