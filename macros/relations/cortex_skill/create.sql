@@ -32,7 +32,7 @@
 --  Returns: {'relations': [target_relation]}
 -#}
   {%- set identifier       = model['alias'] -%}
-  {%- set _m = config.meta.get('stage') -%}
+  {%- set _m = config.get('meta', {}).get('stage') -%}
   {%- set stage            = _m if _m is not none else config.require('stage') -%}
   {%- set skill_path       = stage ~ '/skills/' ~ identifier -%}
   {%- set stage_identifier = stage[1:] -%}

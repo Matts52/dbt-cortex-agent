@@ -16,9 +16,9 @@
       identifier=identifier, schema=schema, database=database,
       type='view') -%}
 
-  {%- set _m = config.meta.get('versioning') -%}
+  {%- set _m = config.get('meta', {}).get('versioning') -%}
   {%- set versioning = _m if _m is not none else config.get('versioning', default=false) -%}
-  {%- set _m = config.meta.get('raw_ddl') -%}
+  {%- set _m = config.get('meta', {}).get('raw_ddl') -%}
   {%- set raw_ddl    = _m if _m is not none else config.get('raw_ddl', default=false) -%}
 
   {{ run_hooks(pre_hooks) }}
@@ -35,12 +35,12 @@
 
     {%- else -%}
 
-      {%- set _m = config.meta.get('version_name') -%}
+      {%- set _m = config.get('meta', {}).get('version_name') -%}
       {%- set version_name = _m if _m is not none else config.get('version_name', default=none) -%}
       {%- if version_name is none -%}
         {%- set version_name = dbt_cortex_agent._cortex_agent_auto_version_name() -%}
       {%- endif -%}
-      {%- set _m = config.meta.get('set_default') -%}
+      {%- set _m = config.get('meta', {}).get('set_default') -%}
       {%- set set_default  = _m if _m is not none else config.get('set_default', default=true) -%}
       {%- set agent_exists = dbt_cortex_agent._cortex_agent_exists(target_relation) -%}
 
@@ -114,19 +114,19 @@
 --  Returns: a valid DDL statement that creates the agent.
 -#}
 
-  {%- set _m = config.meta.get('raw_ddl') -%}
+  {%- set _m = config.get('meta', {}).get('raw_ddl') -%}
   {%- set raw_ddl = _m if _m is not none else config.get('raw_ddl', default=false) -%}
-  {%- set _m = config.meta.get('comment') -%}
+  {%- set _m = config.get('meta', {}).get('comment') -%}
   {%- set comment = _m if _m is not none else config.get('comment', default=none) -%}
-  {%- set _m = config.meta.get('profile') -%}
+  {%- set _m = config.get('meta', {}).get('profile') -%}
   {%- set profile = _m if _m is not none else config.get('profile', default=none) -%}
-  {%- set _m = config.meta.get('web_search_tool') -%}
+  {%- set _m = config.get('meta', {}).get('web_search_tool') -%}
   {%- set web_search_tool = _m if _m is not none else config.get('web_search_tool', default=false) -%}
-  {%- set _m = config.meta.get('model') -%}
+  {%- set _m = config.get('meta', {}).get('model') -%}
   {%- set model = _m if _m is not none else config.get('model', default=none) -%}
-  {%- set _m = config.meta.get('budget') -%}
+  {%- set _m = config.get('meta', {}).get('budget') -%}
   {%- set budget = _m if _m is not none else config.get('budget', default=none) -%}
-  {%- set _m = config.meta.get('mcp_servers') -%}
+  {%- set _m = config.get('meta', {}).get('mcp_servers') -%}
   {%- set mcp_servers = _m if _m is not none else config.get('mcp_servers', default=[]) -%}
 
   {%- if raw_ddl -%}
@@ -197,13 +197,13 @@ $${{ '\n' }}{{ dbt_cortex_agent.cortex_agent_render_model_and_budget(model, budg
 --  Returns: DDL string
 -#}
 
-  {%- set _m = config.meta.get('comment') -%}
+  {%- set _m = config.get('meta', {}).get('comment') -%}
   {%- set comment        = _m if _m is not none else config.get('comment', default=none) -%}
-  {%- set _m = config.meta.get('profile') -%}
+  {%- set _m = config.get('meta', {}).get('profile') -%}
   {%- set profile        = _m if _m is not none else config.get('profile', default=none) -%}
-  {%- set _m = config.meta.get('web_search_tool') -%}
+  {%- set _m = config.get('meta', {}).get('web_search_tool') -%}
   {%- set web_search_tool = _m if _m is not none else config.get('web_search_tool', default=false) -%}
-  {%- set _m = config.meta.get('mcp_servers') -%}
+  {%- set _m = config.get('meta', {}).get('mcp_servers') -%}
   {%- set mcp_servers    = _m if _m is not none else config.get('mcp_servers', default=[]) -%}
 
   {%- if web_search_tool -%}
@@ -254,9 +254,9 @@ $${{ '\n' }}{{ sql }}{{ '\n' }}$$
 --  Returns: DDL string
 -#}
 
-  {%- set _m = config.meta.get('web_search_tool') -%}
+  {%- set _m = config.get('meta', {}).get('web_search_tool') -%}
   {%- set web_search_tool = _m if _m is not none else config.get('web_search_tool', default=false) -%}
-  {%- set _m = config.meta.get('mcp_servers') -%}
+  {%- set _m = config.get('meta', {}).get('mcp_servers') -%}
   {%- set mcp_servers    = _m if _m is not none else config.get('mcp_servers', default=[]) -%}
 
   {%- if web_search_tool -%}
