@@ -1,4 +1,4 @@
-{{ config(materialized='cortex_agent', raw_ddl=true) }}
+{{ config(materialized='cortex_agent', meta={'raw_ddl': true}) }}
 comment = 'Raw-DDL pass-through integration-test agent'
 profile = '{"display_name": "Raw DDL Agent", "color": "green"}'
 from specification

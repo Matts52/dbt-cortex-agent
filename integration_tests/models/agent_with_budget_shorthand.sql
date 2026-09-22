@@ -1,7 +1,7 @@
 {{
   config(
     materialized = 'cortex_agent',
-    budget       = 30
+    meta         = {'budget': 30}
   )
 }}
 instructions:

@@ -32,7 +32,8 @@
 --  Returns: {'relations': [target_relation]}
 -#}
   {%- set identifier       = model['alias'] -%}
-  {%- set stage            = config.require('stage') -%}
+  {%- set _m = config.meta.get('stage') -%}
+  {%- set stage            = _m if _m is not none else config.require('stage') -%}
   {%- set skill_path       = stage ~ '/skills/' ~ identifier -%}
   {%- set stage_identifier = stage[1:] -%}
   {%- set skill_dir        = dbt_cortex_agent.cortex_skill__resolve_skill_dir() -%}
@@ -132,7 +133,7 @@
     {%- set ns = namespace(stage='') -%}
     {%- for node in graph.nodes.values() -%}
       {%- if node.resource_type == 'model' and node.name == model_name -%}
-        {%- set ns.stage = node.config.get('stage', '') -%}
+        {%- set ns.stage = node.config.get('meta', {}).get('stage') or node.config.get('stage', '') -%}
       {%- endif -%}
     {%- endfor -%}
     {%- if ns.stage == '' -%}

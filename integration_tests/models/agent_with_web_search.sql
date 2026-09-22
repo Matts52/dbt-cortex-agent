@@ -1,8 +1,10 @@
 {{
   config(
-    materialized    = 'cortex_agent',
-    comment         = 'Agent with web search enabled (integration test)',
-    web_search_tool = true
+    materialized = 'cortex_agent',
+    meta         = {
+      'comment':         'Agent with web search enabled (integration test)',
+      'web_search_tool': true
+    }
   )
 }}
 models:

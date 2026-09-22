@@ -1,8 +1,10 @@
 {{
   config(
     materialized = 'cortex_agent',
-    comment      = 'Minimal integration-test agent',
-    profile      = {'display_name': 'Minimal Agent', 'color': 'gray'}
+    meta         = {
+      'comment': 'Minimal integration-test agent',
+      'profile': {'display_name': 'Minimal Agent', 'color': 'gray'}
+    }
   )
 }}
 models:

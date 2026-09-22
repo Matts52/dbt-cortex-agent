@@ -1,8 +1,10 @@
 {{
   config(
     materialized = 'cortex_agent',
-    comment      = 'Agent with a skill (compile-only: no live stage in test env)',
-    profile      = {'display_name': 'Skill Agent', 'color': 'purple'}
+    meta         = {
+      'comment': 'Agent with a skill (compile-only: no live stage in test env)',
+      'profile': {'display_name': 'Skill Agent', 'color': 'purple'}
+    }
   )
 }}
 models:
