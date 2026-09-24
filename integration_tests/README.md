@@ -13,7 +13,8 @@ against a live Snowflake account.
 | `agent_minimal`            | cortex_agent       | Spec mode, instructions only, with `comment` + `profile`. |
 | `agent_with_semantic_view` | cortex_agent       | Spec mode, Analyst tool wired to `orders_semantic_view` via `ref()`. |
 | `agent_raw_ddl`            | cortex_agent       | `raw_ddl=true` pass-through mode. |
-| `atlassian_mcp_server`     | cortex_mcp_server  | External MCP server for the Atlassian Jira/Confluence endpoint. |
+| `jira_mcp_api_integration` | cortex_mcp_api_integration | API integration backing the Atlassian MCP endpoint. |
+| `atlassian_mcp_server`     | cortex_mcp_server  | External MCP server for the Atlassian Jira/Confluence endpoint, wired to `jira_mcp_api_integration` via `ref()`. |
 | `agent_with_mcp_server`    | cortex_agent       | Agent wired to `atlassian_mcp_server` via `cortex_mcp_server_name(ref(...))`. |
 
 ## Prerequisites
@@ -21,30 +22,17 @@ against a live Snowflake account.
 - Python 3.9+
 - A Snowflake account/role with privileges to create agents, semantic views,
   tables, and to use Cortex.
+- **ACCOUNTADMIN or CREATE INTEGRATION** privilege on the role running
+  `dbt build` — `jira_mcp_api_integration` creates a Snowflake API INTEGRATION,
+  an account-level object, and needs this privilege the same as any other
+  model in this project needs privileges on its own target schema. There is
+  no separate manual bootstrap step; `dbt build` creates it in DAG order
+  before `atlassian_mcp_server` runs.
 
-### Bootstrap: API integration for MCP servers
-
-The `atlassian_mcp_server` model requires an API integration to exist before
-`dbt build` runs. API integrations are account-level objects that require
-**ACCOUNTADMIN** (or **CREATE INTEGRATION**) privilege to create — they cannot
-be created by a typical dbt service account during `dbt build`.
-
-Run this once with an admin-privileged role before building:
-
-```bash
-dbt run-operation create_mcp_api_integration --target snowflake --args '{
-  integration_name: jira_mcp_api_integration,
-  allowed_prefixes: ["https://mcp.atlassian.com"],
-  auth_type: OAUTH_DYNAMIC_CLIENT,
-  oauth_resource_url: "https://mcp.atlassian.com/v1/mcp"
-}'
-```
-
-If your role does not have the required privilege, switch to ACCOUNTADMIN first
-in your Snowflake session, or ask your account admin to run the operation.
-
-The materialization will fail with a clear error message pointing to this
-bootstrap step if the integration does not exist when `dbt build` runs.
+If your role does not have this privilege, either switch to ACCOUNTADMIN for
+the run or fall back to the `create_mcp_api_integration` run-operation from an
+admin-privileged session before building (see the main README's
+`cortex_mcp_api_integration` section for both paths).
 
 ## Run
 
