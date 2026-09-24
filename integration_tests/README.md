@@ -13,8 +13,8 @@ against a live Snowflake account.
 | `agent_minimal`            | cortex_agent       | Spec mode, instructions only, with `comment` + `profile`. |
 | `agent_with_semantic_view` | cortex_agent       | Spec mode, Analyst tool wired to `orders_semantic_view` via `ref()`. |
 | `agent_raw_ddl`            | cortex_agent       | `raw_ddl=true` pass-through mode. |
-| `jira_mcp_api_integration` | cortex_mcp_api_integration | API integration backing the Atlassian MCP endpoint. |
-| `atlassian_mcp_server`     | cortex_mcp_server  | External MCP server for the Atlassian Jira/Confluence endpoint, wired to `jira_mcp_api_integration` via `ref()`. |
+| `example_mcp_api_integration` | cortex_mcp_api_integration | Generic API integration fixture — exercises structural compilation only, not tied to a real MCP endpoint. |
+| `atlassian_mcp_server`     | cortex_mcp_server  | External MCP server for the Atlassian Jira/Confluence endpoint, wired to `example_mcp_api_integration` via `ref()`. |
 | `agent_with_mcp_server`    | cortex_agent       | Agent wired to `atlassian_mcp_server` via `cortex_mcp_server_name(ref(...))`. |
 
 ## Prerequisites
@@ -23,11 +23,11 @@ against a live Snowflake account.
 - A Snowflake account/role with privileges to create agents, semantic views,
   tables, and to use Cortex.
 - **ACCOUNTADMIN or CREATE INTEGRATION** privilege on the role running
-  `dbt build` — `jira_mcp_api_integration` creates a Snowflake API INTEGRATION,
-  an account-level object, and needs this privilege the same as any other
-  model in this project needs privileges on its own target schema. There is
-  no separate manual bootstrap step; `dbt build` creates it in DAG order
-  before `atlassian_mcp_server` runs.
+  `dbt build` — `example_mcp_api_integration` creates a Snowflake API
+  INTEGRATION, an account-level object, and needs this privilege the same as
+  any other model in this project needs privileges on its own target schema.
+  There is no separate manual bootstrap step; `dbt build` creates it in DAG
+  order before `atlassian_mcp_server` runs.
 
 If your role does not have this privilege, either switch to ACCOUNTADMIN for
 the run or fall back to the `create_mcp_api_integration` run-operation from an
