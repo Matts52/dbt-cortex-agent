@@ -14,8 +14,8 @@ against a live Snowflake account.
 | `agent_with_semantic_view` | cortex_agent       | Spec mode, Analyst tool wired to `orders_semantic_view` via `ref()`. |
 | `agent_raw_ddl`            | cortex_agent       | `raw_ddl=true` pass-through mode. |
 | `example_mcp_api_integration` | cortex_mcp_api_integration | Generic API integration fixture — exercises structural compilation only, not tied to a real MCP endpoint. |
-| `atlassian_mcp_server`     | cortex_mcp_server  | External MCP server for the Atlassian Jira/Confluence endpoint, wired to `example_mcp_api_integration` via `ref()`. |
-| `agent_with_mcp_server`    | cortex_agent       | Agent wired to `atlassian_mcp_server` via `cortex_mcp_server_name(ref(...))`. |
+| `example_mcp_server`       | cortex_mcp_server  | Generic External MCP server fixture, wired to `example_mcp_api_integration` via `ref()` — exercises structural compilation only, not tied to a real MCP endpoint. |
+| `agent_with_mcp_server`    | cortex_agent       | Agent wired to `example_mcp_server` via `cortex_mcp_server_name(ref(...))`. |
 
 ## Prerequisites
 
@@ -27,7 +27,7 @@ against a live Snowflake account.
   INTEGRATION, an account-level object, and needs this privilege the same as
   any other model in this project needs privileges on its own target schema.
   There is no separate manual bootstrap step; `dbt build` creates it in DAG
-  order before `atlassian_mcp_server` runs.
+  order before `example_mcp_server` runs.
 
 If your role does not have this privilege, either switch to ACCOUNTADMIN for
 the run or fall back to the `create_mcp_api_integration` run-operation from an

@@ -31,7 +31,7 @@ jobs:
 
       - name: Compile agent models
         working-directory: integration_tests
-        run: dbt compile --select "agent_*" "example_mcp_api_integration" "atlassian_mcp_server" --target duckdb
+        run: dbt compile --select "agent_*" "example_mcp_api_integration" "example_mcp_server" --target duckdb
 
       - name: Validate create_mcp_api_integration DDL builder
         working-directory: integration_tests
