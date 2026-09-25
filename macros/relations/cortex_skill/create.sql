@@ -1,6 +1,6 @@
 {% macro cortex_skill__resolve_skill_dir() -%}
 {#-
---  Returns the relative path to the sibling skill directory for the current
+--  Returns the absolute path to the sibling skill directory for the current
 --  cortex_skill model, for use in a PUT command.
 --
 --  Convention: the skill directory has the same name as the .sql model
@@ -15,10 +15,13 @@
 --  materialization issues a LIST query to confirm files (including SKILL.md)
 --  were actually uploaded, raising a descriptive compiler error if not.
 --
---  The returned relative path is resolved by Snowflake's Python connector
---  against the process cwd, which dbt sets to the project root at runtime.
+--  Built from flags.PROJECT_DIR rather than left relative: dbt Core sets the
+--  process cwd to the project root, so a relative path resolves fine there,
+--  but dbt Fusion does not, so a relative PUT fails with "file does not
+--  exist" even though the directory is present. flags.PROJECT_DIR is
+--  populated in both runtimes (model['root_path'] is not, under Fusion).
 -#}
-  {{- model['original_file_path'][:-4] -}}
+  {{- flags.PROJECT_DIR ~ '/' ~ model['original_file_path'][:-4] -}}
 {%- endmacro %}
 
 
@@ -87,7 +90,7 @@
 --
 --  Args:
 --  - relation:   SnowflakeRelation or str (for context)
---  - skill_dir:  str - relative local path to the skill directory (from project root)
+--  - skill_dir:  str - absolute local path to the skill directory
 --  - skill_path: str - fully-qualified stage path prefix,
 --                      e.g. '@my_db.my_schema.skill_stage/skills/forecaster_skill'
 --
