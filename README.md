@@ -18,7 +18,7 @@ Currently, as Cortex Agents are only available on the Snowflake adapter, this pa
 
 ## At a glance
 
-- **Materializations:** `cortex_agent`, `cortex_skill`
+- **Materializations:** `cortex_agent`, `cortex_skill`, `cortex_mcp_server`, `cortex_mcp_api_integration`
 - **Warehouse:** Snowflake (Cortex Agents)
 - **dbt compatibility:** dbt 1.5+
 - **Underlying DDL:** [`CREATE AGENT`](https://docs.snowflake.com/en/sql-reference/sql/create-agent) / `PUT 'file://...' @stage`
@@ -375,16 +375,64 @@ object (`CREATE EXTERNAL MCP SERVER`) from a config-only dbt model. Once created
 the MCP server can be wired into a `cortex_agent` model with `ref()` so that the
 DAG enforces correct build order.
 
-### Bootstrap: create the API integration first
+### Create the API integration with `cortex_mcp_api_integration` (recommended)
 
 An External MCP Server references a Snowflake **API INTEGRATION** object that
 authenticates Snowflake's outbound calls to the MCP endpoint. API integrations
 are account-level objects that require **ACCOUNTADMIN** (or **CREATE INTEGRATION**)
-privilege to create — they cannot be created by a typical dbt service account
-during `dbt build`.
+privilege to create — the same as any other privilege a `dbt build` role
+needs on its own target objects, just scoped to the account instead of a schema.
 
-Run the `create_mcp_api_integration` operation **once per MCP endpoint** before
-`dbt build`, using an admin-privileged role:
+The `cortex_mcp_api_integration` materialization makes the integration a
+first-class dbt model, the same way `cortex_mcp_server` and `cortex_skill`
+already are: it's a real DAG node, so a `cortex_mcp_server` model can `ref()`
+it and `dbt build` enforces creation order automatically, and it shows up in
+`dbt ls`/lineage graphs instead of being a config string that has to match an
+object created out-of-band.
+
+`models/jira_mcp_api_integration.sql` — model body is empty, all parameters via `config()`:
+
+```sql
+{{
+  config(
+    materialized       = 'cortex_mcp_api_integration',
+    allowed_prefixes   = ['https://mcp.atlassian.com'],
+    auth_type          = 'OAUTH_DYNAMIC_CLIENT',
+    oauth_resource_url = 'https://mcp.atlassian.com/v1/mcp'
+  )
+}}
+```
+
+For OAuth2 client credentials (providers without Dynamic Client Registration):
+
+```sql
+{{
+  config(
+    materialized                  = 'cortex_mcp_api_integration',
+    allowed_prefixes              = ['https://api.example.com/mcp'],
+    auth_type                     = 'OAUTH2',
+    oauth_client_id               = 'abc123',
+    oauth_client_secret           = 's3cr3t',
+    oauth_token_endpoint          = 'https://api.example.com/oauth/token',
+    oauth_authorization_endpoint  = 'https://api.example.com/oauth/authorize'
+  )
+}}
+```
+
+The integration's Snowflake object name is the model's alias (same convention
+`cortex_mcp_server` uses). `dbt build` creates it with **`CREATE API INTEGRATION
+IF NOT EXISTS`** by default (`if_not_exists=true`) rather than `CREATE OR REPLACE`
+— a broad selector, `state:modified.body` sweep, or `--full-refresh` shouldn't be
+able to silently rotate a live OAuth-authenticated integration as a side effect
+of an unrelated rebuild. Pass `if_not_exists=false` explicitly if you do want
+replace-in-place semantics (e.g. to deliberately rotate configuration).
+
+### Alternative: `create_mcp_api_integration` operation
+
+If you'd rather bootstrap the integration manually outside of `dbt build` —
+e.g. from a session that only holds ACCOUNTADMIN for the duration of the
+bootstrap — the original run-operation still works and behaves exactly as
+before (including its `if_not_exists=false` / `CREATE OR REPLACE` default):
 
 ```bash
 # Dynamic Client Registration (recommended for DCR-capable providers, e.g. Atlassian):
@@ -419,13 +467,18 @@ dbt run-operation create_mcp_api_integration --args '{
 }'
 ```
 
-If the API integration does not exist when `dbt build` runs, the materialization
-will fail immediately with a clear error message that names the missing integration
-and shows the bootstrap command to run.
+Whichever path creates it, if the API integration does not exist when
+`dbt build` reaches a `cortex_mcp_server` model, the materialization fails
+immediately with a clear error message that names the missing integration and
+shows both bootstrap options.
 
 ### Defining an MCP server model
 
-The model body is empty — all parameters are supplied via `config()`:
+The model body is empty — all parameters are supplied via `config()`. Use
+`cortex_mcp_api_integration_name(ref(...))` to wire in an integration created
+by the materialization above (registers the DAG dependency); pass a plain
+string instead if the integration was created out-of-band via the
+run-operation.
 
 `models/atlassian_mcp_server.sql`:
 
@@ -435,7 +488,7 @@ The model body is empty — all parameters are supplied via `config()`:
     materialized    = 'cortex_mcp_server',
     display_name    = 'Atlassian (Jira & Confluence)',
     url             = 'https://mcp.atlassian.com/v1/mcp',
-    api_integration = 'jira_mcp_api_integration'
+    api_integration = dbt_cortex_agent.cortex_mcp_api_integration_name(ref('jira_mcp_api_integration'))
   )
 }}
 ```
@@ -469,7 +522,29 @@ mcp_servers:
 |-------------------|----------|--------|-------------|
 | `display_name`    | Yes      | string | Human-readable label shown in Snowflake. |
 | `url`             | Yes      | string | MCP server endpoint URL. |
-| `api_integration` | Yes      | string | Name of the pre-existing Snowflake API integration object. |
+| `api_integration` | Yes      | string | Name of the Snowflake API integration object — pass `dbt_cortex_agent.cortex_mcp_api_integration_name(ref('...'))` to wire a DAG dependency, or a plain string for an out-of-band integration. |
+
+### `cortex_mcp_api_integration` configuration reference
+
+| Config                         | Required                    | Type         | Description |
+|--------------------------------|-----------------------------|--------------|-------------|
+| `allowed_prefixes`             | Yes                         | list[string] | Base URL(s) of the MCP server, matched as a prefix. |
+| `auth_type`                    | No (default `OAUTH_DYNAMIC_CLIENT`) | string | `OAUTH_DYNAMIC_CLIENT` or `OAUTH2`. |
+| `oauth_resource_url`           | Yes (OAUTH_DYNAMIC_CLIENT)  | string       | MCP server URL used for DCR. |
+| `oauth_client_id`              | Yes (OAUTH2)                | string       | OAuth2 client ID. |
+| `oauth_client_secret`          | Yes (OAUTH2)                | string       | OAuth2 client secret. |
+| `oauth_token_endpoint`         | Yes (OAUTH2)                | string       | OAuth2 token endpoint URL. |
+| `oauth_authorization_endpoint` | Yes (OAUTH2)                | string       | OAuth2 authorization endpoint URL. |
+| `oauth_client_auth_method`     | No (OAUTH2 only)            | string       | `CLIENT_SECRET_BASIC` or `CLIENT_SECRET_POST`. |
+| `oauth_discovery_url`          | No (OAUTH2 only)            | string       | OIDC discovery URL. |
+| `oauth_refresh_token_validity` | No (OAUTH2 only)            | int          | Refresh token validity in seconds. |
+| `enabled`                      | No (default `true`)         | bool         | Whether the integration is enabled. |
+| `if_not_exists`                | No (default **`true`**)     | bool         | Use `IF NOT EXISTS` instead of `OR REPLACE`. Defaults opposite to the `create_mcp_api_integration` operation — see the note above on why. |
+| `comment`                      | No                          | string       | Optional `COMMENT` clause. |
+
+The integration's Snowflake object name is always the model's alias — there is
+no `integration_name` config (unlike the operation below), since the model
+identity already provides it.
 
 ### `create_mcp_api_integration` operation reference
 
@@ -527,6 +602,20 @@ in the model's target database/schema with the model's `alias` as its name.
   statement for both specification and raw modes.
 - **Drop / rename** (`macros/relations/cortex_agent/{drop,rename}.sql`) —
   provide `drop agent if exists` and `alter agent ... rename to` DDL.
+- **`cortex_mcp_api_integration` materialization**
+  (`macros/materializations/cortex_mcp_api_integration.sql`) — sets the query
+  tag, runs pre-hooks, issues a single `CREATE API INTEGRATION IF NOT EXISTS`
+  (or `CREATE OR REPLACE` with `if_not_exists=false`) statement, runs
+  post-hooks, and returns the relation.
+- **Shared DDL builder** (`macros/operations/create_mcp_api_integration.sql`,
+  `_mcp_api_integration_ddl`) — validates arguments and constructs the
+  `CREATE API INTEGRATION` statement. Both the `cortex_mcp_api_integration`
+  materialization and the `create_mcp_api_integration` run-operation call this
+  same macro, so they can never drift on DDL shape or validation rules — only
+  on their own `if_not_exists` default and whether they execute immediately or
+  log/return.
+- **Drop / rename** (`macros/relations/cortex_mcp_api_integration/{drop,rename}.sql`) —
+  provide `drop api integration if exists` and `alter api integration ... rename to` DDL.
 
 Every run issues `CREATE OR REPLACE AGENT`, which is idempotent and atomic, so
 re-running a model simply replaces the agent in place.
@@ -549,6 +638,20 @@ re-running a model simply replaces the agent in place.
   (e.g. `CREATE AGENT` on the schema) and to reference any semantic views or
   Cortex Search services named in `tool_resources`. See the
   [Cortex Agents docs](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents-manage).
+- **`cortex_mcp_api_integration` is account-level, like `cortex_mcp_server`.**
+  Snowflake API INTEGRATION objects have no database/schema, so (same as
+  `cortex_mcp_server`) the node is tracked internally as a `view` for
+  graph/lineage purposes only — dbt never issues `CREATE VIEW` for it. The
+  executing role needs **ACCOUNTADMIN** or **CREATE INTEGRATION** account-level
+  privilege, which is broader than what most other models in a project need;
+  scope which role runs this model accordingly (e.g. a separate `dbt build
+  --select cortex_mcp_api_integration:*` step under an elevated role, if your
+  normal service account shouldn't hold that privilege day-to-day).
+- **`if_not_exists` default differs by entry point.** The
+  `cortex_mcp_api_integration` materialization defaults to `if_not_exists=true`;
+  the `create_mcp_api_integration` operation defaults to `if_not_exists=false`
+  (`CREATE OR REPLACE`), preserved for backward compatibility with existing
+  callers. See the config reference tables above.
 
 ---
 
