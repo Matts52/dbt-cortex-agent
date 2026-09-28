@@ -34,7 +34,7 @@ models:
     description: "Cortex Agent that references forecaster_skill via the skills array; depends_on ensures the skill file is deployed first."
 
   - name: agent_versioned
-    description: "Cortex Agent with versioning=true. Compiles to CREATE AGENT IF NOT EXISTS ... ADD VERSION DDL. Compile-path test only."
+    description: "Cortex Agent with versioning=true. Compiles to CREATE AGENT ... FROM SPECIFICATION (first-run form of the live-version workflow). Compile-path test only."
 
   - name: example_mcp_api_integration
     description: "Generic Snowflake API integration fixture. Created by the cortex_mcp_api_integration materialization. Exercises structural compilation only, not tied to a real MCP endpoint."
