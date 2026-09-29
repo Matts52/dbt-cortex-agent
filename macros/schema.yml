@@ -3,8 +3,9 @@ version: 2
 macros:
   - name: snowflake__create_or_replace_cortex_agent
     description: >
-      Orchestrates the CREATE OR REPLACE AGENT statement for a model using the
-      `cortex_agent` materialization. Runs pre/post hooks and returns the
+      Orchestrates the agent DDL for a model using the `cortex_agent`
+      materialization (CREATE OR REPLACE, or the live-version workflow when
+      versioning=true). Runs pre/post hooks and returns the
       target relation. Called internally by the materialization — not intended
       for direct use.
 
@@ -159,46 +160,132 @@ macros:
           Agent profile configuration. Example as dict:
           {'display_name': 'Sales Assistant', 'avatar': 'icon.png', 'color': 'blue'}
 
-  - name: snowflake__get_create_agent_with_version_sql
+  - name: cortex_agent_render_spec_body
     description: >
-      Produces CREATE AGENT IF NOT EXISTS ... ADD VERSION ... FROM SPECIFICATION
-      DDL for a new agent with a named first version. Used internally by the
-      versioning path when the agent does not yet exist.
-      SYNTAX SUBJECT TO VERIFICATION against live Snowflake Cortex Agent docs.
+      Renders the full specification YAML for specification mode: the model
+      body plus the config-injected `models:` / `orchestration:` blocks, the
+      web_search tool and `mcp_servers:`. Shared by the CREATE OR REPLACE and
+      versioning paths so every config behaves the same in both.
     arguments:
-      - name: relation
-        type: string
-        description: The fully-qualified agent name.
-      - name: version_name
-        type: string
-        description: The name of the first version to create.
       - name: sql
         type: string
         description: The compiled specification YAML body.
 
-  - name: snowflake__get_alter_agent_add_version_sql
+  - name: _cortex_agent_validate_version_name
     description: >
-      Produces ALTER AGENT ... ADD VERSION ... FROM SPECIFICATION DDL for adding
-      a named version to an existing agent. Used internally by the versioning
-      path when the agent already exists. Note: COMMENT and PROFILE are omitted
-      as they are agent-level attributes set at creation time.
-      SYNTAX SUBJECT TO VERIFICATION against live Snowflake Cortex Agent docs.
+      Raises a compiler error unless `version_name` matches
+      ^[A-Za-z_][A-Za-z0-9_$]*$ (a valid unquoted Snowflake identifier; it
+      is stored uppercased). Called before any versioning DDL runs.
+      Internal helper — not intended for direct use.
+    arguments:
+      - name: version_name
+        type: string
+        description: The alias to validate, or none.
+
+  - name: _cortex_agent_promote_and_tag
+    description: >
+      After a commit, pins the new version as the default when
+      set_default=true, then tags it with `version_name` as its alias.
+      Promotion runs first so a failed alias never blocks it.
+      Internal helper — not intended for direct use.
     arguments:
       - name: relation
         type: string
         description: The fully-qualified agent name.
+      - name: committed_name
+        type: string
+        description: The Snowflake version name just committed, e.g. VERSION$3.
       - name: version_name
         type: string
-        description: The name of the version to add.
+        description: The alias to set, or none.
+      - name: set_default
+        type: boolean
+        description: Whether to make the committed version the default.
+
+  - name: snowflake__get_create_versioned_agent_sql
+    description: >
+      Produces CREATE AGENT ... FROM SPECIFICATION DDL (plain CREATE, not OR
+      REPLACE) for the first run of the versioning path. Snowflake commits the
+      specification as VERSION$1; the orchestrator then pins it as the
+      default (Snowflake's initial default is the floating LAST).
+    arguments:
+      - name: relation
+        type: string
+        description: The fully-qualified agent name.
       - name: sql
         type: string
         description: The compiled specification YAML body.
+
+  - name: snowflake__get_add_live_agent_version_sql
+    description: >
+      Produces ALTER AGENT ... ADD LIVE VERSION FROM LAST, which opens an
+      editable live version seeded from the newest committed version.
+    arguments:
+      - name: relation
+        type: string
+        description: The fully-qualified agent name.
+
+  - name: snowflake__get_modify_live_agent_version_sql
+    description: >
+      Produces ALTER AGENT ... MODIFY LIVE VERSION SET SPECIFICATION = $$...$$
+      to replace the live version's specification.
+    arguments:
+      - name: relation
+        type: string
+        description: The fully-qualified agent name.
+      - name: sql
+        type: string
+        description: The compiled specification YAML body.
+
+  - name: snowflake__get_set_agent_attributes_sql
+    description: >
+      Produces ALTER AGENT ... SET COMMENT = ..., PROFILE = ... to update the
+      agent-level attributes of an existing agent.
+    arguments:
+      - name: relation
+        type: string
+        description: The fully-qualified agent name.
+      - name: comment
+        type: string
+        description: The agent comment, or none.
+      - name: profile
+        type: string
+        description: The agent profile (dict or JSON string), or none.
+
+  - name: snowflake__get_commit_agent_version_sql
+    description: >
+      Produces ALTER AGENT ... COMMIT COMMENT = ..., which commits the live
+      version as a new immutable VERSION$<n>.
+    arguments:
+      - name: relation
+        type: string
+        description: The fully-qualified agent name.
+      - name: comment
+        type: string
+        description: Comment recorded on the committed version.
+
+  - name: snowflake__get_set_agent_version_alias_sql
+    description: >
+      Produces ALTER AGENT ... MODIFY VERSION <version> SET ALIAS = <alias>.
+      The alias is emitted unquoted: it must be a valid unquoted identifier
+      (validated before any DDL runs) and Snowflake stores it uppercased.
+      Aliases are unique per agent; reusing one moves it to this version.
+    arguments:
+      - name: relation
+        type: string
+        description: The fully-qualified agent name.
+      - name: version
+        type: string
+        description: The Snowflake version name, e.g. VERSION$3.
+      - name: alias
+        type: string
+        description: A valid unquoted Snowflake identifier.
 
   - name: snowflake__get_set_agent_default_version_sql
     description: >
       Produces ALTER AGENT ... SET DEFAULT_VERSION = ... DDL to flip which
-      version handles live traffic. Called when set_default=true (the default).
-      SYNTAX SUBJECT TO VERIFICATION against live Snowflake Cortex Agent docs.
+      version handles live traffic. Accepts VERSION$<n>, FIRST or LAST — not
+      an alias.
     arguments:
       - name: relation
         type: string
@@ -206,6 +293,19 @@ macros:
       - name: version_name
         type: string
         description: The version to promote to default.
+
+  - name: set_cortex_agent_default_version
+    description: >
+      Run-operation that points an agent's default version at a committed
+      version, given either its Snowflake version name (VERSION$3) or an
+      alias set by a versioned run. Use it to promote a canary or roll back.
+    arguments:
+      - name: agent
+        type: string
+        description: The fully-qualified agent name.
+      - name: version
+        type: string
+        description: An alias, VERSION$<n>, FIRST or LAST.
 
   - name: snowflake__create_or_replace_cortex_mcp_server
     description: >

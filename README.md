@@ -216,11 +216,18 @@ $$
 
 By default, every `dbt run` issues `CREATE OR REPLACE AGENT` — the new spec is live the instant the run finishes, with no version history and no rollback path.
 
-Set `versioning=true` to opt into named-version DDL instead. The package tracks whether the agent already exists and issues the appropriate DDL:
+Set `versioning=true` to use Snowflake's [agent versioning](https://docs.snowflake.com/en/sql-reference/sql/alter-agent) instead. Snowflake names committed versions itself (`VERSION$1`, `VERSION$2`, …); the package tracks whether the agent already exists and issues the appropriate DDL:
 
-- **First run (agent absent):** `CREATE AGENT IF NOT EXISTS ... ADD VERSION '<name>' FROM SPECIFICATION $$...$$`
-- **Subsequent runs (agent present):** `ALTER AGENT ... ADD VERSION '<name>' FROM SPECIFICATION $$...$$`
-- **Promotion (when `set_default=true`, the default):** `ALTER AGENT ... SET DEFAULT_VERSION = '<name>'`
+- **First run (agent absent):** `CREATE AGENT ... FROM SPECIFICATION $$...$$` — Snowflake commits it as `VERSION$1`, which the package always pins as the default (Snowflake's initial default is the floating `LAST`).
+- **Subsequent runs (agent present):**
+  1. `ALTER AGENT ... ADD LIVE VERSION FROM LAST` (only if no live version is open)
+  2. `ALTER AGENT ... MODIFY LIVE VERSION SET SPECIFICATION = $$...$$`
+  3. `ALTER AGENT ... SET COMMENT = ..., PROFILE = ...` (when configured)
+  4. `ALTER AGENT ... COMMIT` — **skipped when the spec is unchanged**, so re-running an unchanged model does not pile up identical versions.
+- **Promotion (when `set_default=true`, the default):** `ALTER AGENT ... SET DEFAULT_VERSION = 'VERSION$<n>'`.
+- **Tagging:** the new version gets `version_name` as its alias: `ALTER AGENT ... MODIFY VERSION VERSION$<n> SET ALIAS = <version_name>`.
+
+The agent is never dropped or replaced on this path, so its version history and grants survive every run. `ALTER AGENT` needs `OWNERSHIP` or `MODIFY` on the agent.
 
 #### Minimal example
 
@@ -237,7 +244,9 @@ instructions:
   response: "Be concise."
 ```
 
-Each run auto-generates a version name from `run_started_at` in the format `v_YYYYMMDD_HHMMSS`. All models versioned in the same `dbt run` share one version name, so rolling back a full run is as simple as flipping the default pointer back to the previous timestamp name.
+When `version_name` is omitted, each run tags its new version with an alias generated from `run_started_at` in the format `v_YYYYMMDD_HHMMSS`. All models versioned in the same `dbt run` share one alias, so rolling back a full run means pointing each agent's default back at the previous timestamp alias.
+
+`version_name` must be a valid unquoted Snowflake identifier (`^[A-Za-z_][A-Za-z0-9_$]*$` — so not `v1.2`, `v-1` or `2024_01`); an invalid name fails the run at compile time, before any DDL. Snowflake stores aliases uppercased. Aliases are unique per agent: reusing one moves it to the new version, which makes a floating tag such as `canary` work naturally.
 
 #### Staging a canary version
 
@@ -248,25 +257,32 @@ Deploy a new spec without affecting live traffic by setting `set_default=false`:
   config(
     materialized = 'cortex_agent',
     versioning   = true,
-    version_name = 'v_canary',
-    set_default  = false          -- create version but keep existing default live
+    version_name = 'canary',
+    set_default  = false          -- commit a new version but keep the current default live
   )
 }}
 ```
 
-After validating the canary out of band, promote it:
+With `set_default=false` the package pins the current default before committing, so the commit cannot move it.
+
+After validating the canary out of band, promote it either by flipping `set_default` back to `true` and re-running (the spec is unchanged, so no new version is committed — the newest version is just promoted), or directly:
 
 ```bash
-dbt run --select my_agent --vars '{"version_name": "v_canary", "set_default": true}'
+dbt run-operation set_cortex_agent_default_version --args '{agent: my_db.my_schema.my_agent, version: canary}'
 ```
 
 #### Rollback
 
-Flip `DEFAULT VERSION` back to any prior version name by re-running with an explicit `version_name` and `set_default=true`:
+Point the default at any earlier version, by alias or by Snowflake version name:
 
 ```bash
-dbt run --select my_agent --vars '{"version_name": "v_20250101_120000", "set_default": true}'
+dbt run-operation set_cortex_agent_default_version --args '{agent: my_db.my_schema.my_agent, version: v_20250101_120000}'
+dbt run-operation set_cortex_agent_default_version --args '{agent: my_db.my_schema.my_agent, version: VERSION$3}'
 ```
+
+A later `dbt run` with `set_default=true` promotes the newest version again, so make the rollback permanent by reverting the spec in git (which commits it as a new version).
+
+> **Warning:** switching a model from `versioning=true` back to `false` makes the next run issue `CREATE OR REPLACE AGENT`, which wipes the agent's entire version history and all aliases.
 
 > **Note:** `versioning=true` is incompatible with `raw_ddl=true`. If both are set, a compile-time warning is emitted and the materialization falls back to `CREATE OR REPLACE` behavior. Use specification mode (`raw_ddl=false`) to enable versioning.
 
@@ -580,9 +596,9 @@ identity already provides it.
 | `profile`         | specification   | dict or string | Sets the `PROFILE` clause. A dict is serialized to JSON for you (`display_name`, `avatar`, `color`); a string is used verbatim. |
 | `web_search_tool` | specification   | bool (default `false`) | When `true`, injects a `tool_spec` entry for web search into the agent specification YAML, enabling live web search for the agent. If your spec already has a `tools:` block, add the entry there directly instead. |
 | `raw_ddl`         | both            | bool (default `false`) | When `true`, the model body is treated as raw DDL appended after `CREATE OR REPLACE AGENT <name>`, and `comment` / `profile` / `web_search_tool` configs are ignored (a compile-time warning is emitted if any of these are set). |
-| `versioning`      | specification   | bool (default `false`) | Master switch for named-version mode. When `true`, uses `ADD VERSION` DDL instead of `CREATE OR REPLACE`. Incompatible with `raw_ddl=true` (a warning is emitted and the run falls back to `CREATE OR REPLACE`). |
-| `version_name`    | specification (versioning=true) | string | Name of the version to create. When omitted, auto-generated as `v_YYYYMMDD_HHMMSS` from `run_started_at` — deterministic within a run and safe as a Snowflake identifier. |
-| `set_default`     | specification (versioning=true) | bool (default `true`) | When `true`, flips the agent's `DEFAULT VERSION` to this version after creating it. Set `false` to create a staging/canary version without affecting live traffic. |
+| `versioning`      | specification   | bool (default `false`) | Master switch for versioned mode. When `true`, creates the agent once and then commits each changed spec as a new version (`MODIFY LIVE VERSION` + `COMMIT`) instead of `CREATE OR REPLACE`. Incompatible with `raw_ddl=true` (a warning is emitted and the run falls back to `CREATE OR REPLACE`). Switching back to `false` runs `CREATE OR REPLACE`, which wipes the version history and aliases. |
+| `version_name`    | specification (versioning=true) | string | Alias to tag the newly committed version with (Snowflake names the version itself, `VERSION$<n>`). Must be a valid unquoted identifier (`^[A-Za-z_][A-Za-z0-9_$]*$`, checked at compile time); stored uppercased; unique per agent — reusing one moves it to the new version. When omitted, auto-generated as `v_YYYYMMDD_HHMMSS` from `run_started_at` — deterministic within a run. |
+| `set_default`     | specification (versioning=true) | bool (default `true`) | When `true`, pins the agent's `DEFAULT VERSION` to the newly committed version (or to the newest version, if the spec is unchanged). Set `false` to commit a staging/canary version without affecting live traffic — the current default is pinned first. |
 
 Standard dbt configs (`database`, `schema`, `alias`, `tags`, `pre_hook`,
 `post_hook`, `grants`, `enabled`, …) all work as usual. The agent is created
