@@ -221,10 +221,13 @@
   {%- set _m = config.get('meta', {}).get('mcp_servers') -%}
   {%- set mcp_servers = _m if _m is not none else config.get('mcp_servers', default=[]) -%}
 
+  {%- set _m = config.get('meta', {}).get('analytical_search') -%}
+  {%- set analytical_search = _m if _m is not none else config.get('analytical_search', default=false) -%}
+
   {%- if raw_ddl -%}
 
-    {%- if web_search_tool or comment is not none or profile is not none or model is not none or budget is not none or mcp_servers | length > 0 -%}
-      {{ exceptions.warn("cortex_agent: web_search_tool, comment, profile, model, budget, and mcp_servers configs are ignored when raw_ddl=true. Add these directly to your DDL body.") }}
+    {%- if web_search_tool or comment is not none or profile is not none or model is not none or budget is not none or mcp_servers | length > 0 or analytical_search -%}
+      {{ exceptions.warn("cortex_agent: web_search_tool, comment, profile, model, budget, mcp_servers, and analytical_search configs are ignored when raw_ddl=true. Add these directly to your DDL body.") }}
     {%- endif -%}
 
     create or replace agent {{ relation }}
@@ -251,9 +254,9 @@ $${{ '\n' }}{{ dbt_cortex_agent.cortex_agent_render_spec_body(sql) }}{{ '\n' }}$
 {#-
 --  Render the full specification YAML for specification mode: the model body
 --  plus the config-injected `models:` / `orchestration:` blocks (from the
---  `model` / `budget` configs), the web_search tool, and `mcp_servers:`.
---  Shared by the CREATE OR REPLACE path and the versioning path so every
---  config behaves the same in both.
+--  `model` / `budget` / `analytical_search` configs), the web_search tool,
+--  and `mcp_servers:`. Shared by the CREATE OR REPLACE path and the
+--  versioning path so every config behaves the same in both.
 --
 --  Args:
 --  - sql: str — the compiled model body (agent specification YAML)
@@ -267,15 +270,17 @@ $${{ '\n' }}{{ dbt_cortex_agent.cortex_agent_render_spec_body(sql) }}{{ '\n' }}$
   {%- set budget = _m if _m is not none else config.get('budget', default=none) -%}
   {%- set _m = config.get('meta', {}).get('mcp_servers') -%}
   {%- set mcp_servers = _m if _m is not none else config.get('mcp_servers', default=[]) -%}
+  {%- set _m = config.get('meta', {}).get('analytical_search') -%}
+  {%- set analytical_search = _m if _m is not none else config.get('analytical_search', default=false) -%}
 
   {%- if model is not none and '\nmodels:' in ('\n' ~ sql) -%}
     {{ exceptions.warn("cortex_agent: 'model' config is set but the spec body also appears to contain a top-level 'models:' key. The config-injected value will be ignored by most YAML parsers. Remove 'models:' from the spec body or unset the 'model' config.") }}
   {%- endif -%}
-  {%- if budget is not none and '\norchestration:' in ('\n' ~ sql) -%}
-    {{ exceptions.warn("cortex_agent: 'budget' config is set but the spec body also appears to contain a top-level 'orchestration:' key. The config-injected value will be ignored by most YAML parsers. Remove 'orchestration:' from the spec body or unset the 'budget' config.") }}
-  {%- endif -%}
   {%- if mcp_servers | length > 0 and '\nmcp_servers:' in ('\n' ~ sql) -%}
     {{ exceptions.warn("cortex_agent: 'mcp_servers' config is set but the spec body also appears to contain a top-level 'mcp_servers:' key. The config-injected block will conflict. Remove 'mcp_servers:' from the spec body or unset the 'mcp_servers' config.") }}
+  {%- endif -%}
+  {%- if analytical_search and 'cortex_search' not in sql -%}
+    {{ exceptions.warn("cortex_agent: analytical_search=true but the spec contains no cortex_search tool. The flag has no effect without one.") }}
   {%- endif -%}
 
   {%- if web_search_tool -%}
@@ -290,7 +295,9 @@ $${{ '\n' }}{{ dbt_cortex_agent.cortex_agent_render_spec_body(sql) }}{{ '\n' }}$
     {%- set sql = sql ~ mcp_block -%}
   {%- endif -%}
 
-  {{- dbt_cortex_agent.cortex_agent_render_model_and_budget(model, budget) ~ sql -}}
+  {%- set sql = dbt_cortex_agent.cortex_agent_merge_orchestration(sql, budget, analytical_search) -%}
+
+  {{- dbt_cortex_agent.cortex_agent_render_model_and_budget(model) ~ sql -}}
 {%- endmacro %}
 
 
@@ -416,16 +423,14 @@ $${{ '\n' }}{{ dbt_cortex_agent.cortex_agent_render_spec_body(sql) }}{{ '\n' }}$
 {%- endmacro %}
 
 
-{% macro cortex_agent_render_model_and_budget(model, budget) -%}
+{% macro cortex_agent_render_model_and_budget(model) -%}
 {#-
---  Render the `models:` and `orchestration:` YAML blocks that are prepended
---  to the spec body when the `model` and/or `budget` configs are set.
+--  Render the `models:` YAML block prepended to the spec body when the
+--  `model` config is set. Orchestration config merging (budget,
+--  analytical_search) is handled by `cortex_agent_merge_orchestration`.
 --
 --  Args:
---  - model:  string or none — value for `models.orchestration`
---  - budget: int, float, or dict or none
---      int/float → shorthand for {seconds: <value>}
---      dict      → {seconds: ..., tokens: ...} (either key is optional)
+--  - model: string or none — value for `models.orchestration`
 --
 --  Returns: a YAML fragment (possibly empty) ending with a newline when
 --  non-empty, so it can be concatenated directly before the spec body.
@@ -435,14 +440,39 @@ $${{ '\n' }}{{ dbt_cortex_agent.cortex_agent_render_spec_body(sql) }}{{ '\n' }}$
     {%- do lines.append('models:') -%}
     {%- do lines.append('  orchestration: ' ~ model) -%}
   {%- endif -%}
-  {%- if budget is not none -%}
-    {%- set budget = {'seconds': budget} if (budget is not mapping) else budget -%}
-    {%- do lines.append('orchestration:') -%}
-    {%- do lines.append('  budget:') -%}
-    {%- if budget.seconds is defined -%}{%- do lines.append('    seconds: ' ~ budget.seconds) -%}{%- endif -%}
-    {%- if budget.tokens  is defined -%}{%- do lines.append('    tokens: '  ~ budget.tokens)  -%}{%- endif -%}
-  {%- endif -%}
   {{- (lines | join('\n')) ~ ('\n' if lines else '') -}}
+{%- endmacro %}
+
+
+{% macro cortex_agent_merge_orchestration(sql, budget, analytical_search) -%}
+{#-
+--  Merge orchestration config values into the spec body YAML using
+--  parse-and-reserialize so they compose correctly with any existing
+--  `orchestration:` block in the body (no duplicate top-level keys).
+--
+--  Args:
+--  - sql:               str — the accumulated spec YAML (post web_search/mcp appends)
+--  - budget:            int, float, dict, or none
+--      int/float → {seconds: <value>}; dict → {seconds: ..., tokens: ...}
+--  - analytical_search: bool — when true, sets orchestration.capabilities.analytical_search
+--
+--  Returns: the spec YAML string with orchestration merged in. When neither
+--  budget nor analytical_search is set, returns sql unchanged.
+-#}
+  {%- if budget is none and not analytical_search -%}{{ return(sql) }}{%- endif -%}
+  {%- set spec = modules.yaml.safe_load(sql) or {} -%}
+  {%- set orch = spec.get('orchestration') or {} -%}
+  {%- if budget is not none -%}
+    {%- set budget_dict = {'seconds': budget} if (budget is not mapping) else budget -%}
+    {%- do orch.update({'budget': budget_dict}) -%}
+  {%- endif -%}
+  {%- if analytical_search -%}
+    {%- set caps = orch.get('capabilities') or {} -%}
+    {%- do caps.update({'analytical_search': true}) -%}
+    {%- do orch.update({'capabilities': caps}) -%}
+  {%- endif -%}
+  {%- do spec.update({'orchestration': orch}) -%}
+  {{- modules.yaml.safe_dump(spec, sort_keys=false) -}}
 {%- endmacro %}
 
 
