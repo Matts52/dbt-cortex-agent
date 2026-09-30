@@ -365,7 +365,9 @@ macros:
       Orchestrates deploying an evaluation config for a model using the
       `cortex_agent_eval` materialization: ensures the stage exists, writes the
       model body (the evaluation YAML) to `<stage>/evals/<alias>/config.yaml`
-      with COPY INTO, and verifies the file landed. Runs pre/post hooks.
+      with COPY INTO, and verifies the file landed. If the YAML has a
+      `dataset:` block, registers the dataset first and removes the block from
+      the uploaded file. Runs pre/post hooks.
       Called internally by the materialization, not intended for direct use.
 
   - name: snowflake__get_create_cortex_agent_eval_sql
@@ -392,24 +394,6 @@ macros:
         type: string
         description: A ref() to the cortex_agent_eval model, or its name.
 
-  - name: snowflake__create_or_replace_cortex_agent_eval_dataset
-    description: >
-      Orchestrates a model using the `cortex_agent_eval_dataset`
-      materialization: builds the source table, drops any existing dataset with
-      the same name (Snowflake refuses to re-create one), and registers it with
-      SYSTEM$CREATE_EVALUATION_DATASET. Called internally, not intended for
-      direct use.
-
-  - name: cortex_agent_eval_dataset_name
-    description: >
-      Returns the dataset object (renders as its fully-qualified name) for a
-      cortex_agent_eval_dataset model, for use as `source_metadata.dataset_name`
-      in an evaluation YAML. Calling it with ref() registers the DAG dependency.
-    arguments:
-      - name: dataset_ref
-        type: string
-        description: A ref() to the cortex_agent_eval_dataset model.
-
   - name: run_cortex_agent_eval
     description: >
       Run-operation: starts an evaluation run with EXECUTE_AI_EVALUATION. With
@@ -423,7 +407,7 @@ macros:
         type: string
         description: Unique run name (default `<eval>_<UTC timestamp>`).
       - name: wait
-        type: boolean
+        type: bool
         description: Poll until the run reaches a terminal state (default false).
       - name: timeout_seconds
         type: integer

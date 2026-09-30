@@ -48,8 +48,5 @@ models:
   - name: agent_eval_target
     description: "Tool-free Cortex Agent that agent_eval evaluates."
 
-  - name: agent_eval_questions
-    description: "Golden question set materialized as a table and registered as a Cortex Agent evaluation dataset by the cortex_agent_eval_dataset materialization."
-
   - name: agent_eval
-    description: "Evaluation config for agent_eval_target, written to a named stage by the cortex_agent_eval materialization. Does not start a run."
+    description: "Evaluation config for agent_eval_target, written to a named stage by the cortex_agent_eval materialization. Its dataset: block registers the agent_eval_questions seed as an evaluation dataset. Does not start a run."

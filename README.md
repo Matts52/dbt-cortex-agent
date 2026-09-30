@@ -18,7 +18,7 @@ Currently, as Cortex Agents are only available on the Snowflake adapter, this pa
 
 ## At a glance
 
-- **Materializations:** `cortex_agent`, `cortex_skill`, `cortex_agent_eval_dataset`, `cortex_agent_eval`, `cortex_mcp_server`, `cortex_mcp_api_integration`
+- **Materializations:** `cortex_agent`, `cortex_skill`, `cortex_agent_eval`, `cortex_mcp_server`, `cortex_mcp_api_integration`
 - **Warehouse:** Snowflake (Cortex Agents)
 - **dbt compatibility:** dbt 1.5+
 - **Underlying DDL:** [`CREATE AGENT`](https://docs.snowflake.com/en/sql-reference/sql/create-agent) / `PUT 'file://...' @stage`
@@ -384,12 +384,12 @@ as usual. The model `alias` becomes the skill folder name on the stage.
 
 ---
 
-## Evaluations (`cortex_agent_eval_dataset` and `cortex_agent_eval`)
+## Evaluations (`cortex_agent_eval` materialization)
 
 [Cortex Agent evaluations](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents-evaluations)
 score an agent against a golden question set with system and custom LLM-judge metrics.
-Snowflake has no `CREATE EVALUATION` statement. An evaluation is driven by an **evaluation
-dataset**, a **YAML config file on a stage**, and the `EXECUTE_AI_EVALUATION` procedure.
+Snowflake has no `CREATE EVALUATION` statement. An evaluation is an **evaluation dataset**, a
+**YAML config file on a stage**, and the `EXECUTE_AI_EVALUATION` procedure.
 
 The package follows the same deploy model as skills: `dbt build` deploys the dataset and the
 config (in dependency order, after the agent they point at), and running an evaluation is a
@@ -398,46 +398,44 @@ they are deliberately **not** part of `dbt build`.
 
 | Piece | dbt construct | What it does |
 |-------|---------------|--------------|
-| Golden question set | `cortex_agent_eval_dataset` model | Builds a table and registers it with `SYSTEM$CREATE_EVALUATION_DATASET` |
-| Evaluation config | `cortex_agent_eval` model | Writes the model body (the evaluation YAML) to a stage file |
+| Evaluation (dataset + config) | `cortex_agent_eval` model | Registers the dataset and writes the evaluation YAML to a stage file |
 | Run / poll / cancel / delete | `run-operation` macros | Wrap `EXECUTE_AI_EVALUATION` |
 | Results | `cortex_agent_eval_results()` macro | Returns a `SELECT` over `GET_AI_EVALUATION_DATA` |
 
-### Defining the dataset
+### Where the questions live
 
-The model body is a `SELECT` returning the question and its ground truth. `ground_truth` must
-be a `VARIANT`, with any of `ground_truth_output` (expected answer), `ground_truth_invocations`
-(expected tool calls) and any keys read by custom metrics.
+The questions and ground truths live in **any table or view in your project**: a seed, a
+source, or a model. The package never copies or rebuilds them; it registers the dataset over
+whatever `table_name` points at. The usual shape is a seed CSV:
 
-`models/evals/support_agent_questions.sql`:
+`seeds/support_agent_questions.csv`:
 
-```sql
-{{ config(materialized = 'cortex_agent_eval_dataset') }}
-
-select 'What is our refund window?' as query_text,
-       parse_json('{"ground_truth_output": "30 days"}') as ground_truth
-union all
-select 'Which tool answers revenue questions?' as query_text,
-       parse_json('{
-         "ground_truth_invocations": [
-           {"tool_name": "Analyst1", "tool_input": "revenue by quarter", "tool_output": "revenue table"}
-         ]
-       }') as ground_truth
+```csv
+question,expected
+What is our refund window?,"{""ground_truth_output"": ""30 days""}"
+Which tool answers revenue questions?,"{""ground_truth_invocations"": [{""tool_name"": ""Analyst1"", ""tool_input"": ""revenue by quarter"", ""tool_output"": ""revenue table""}]}"
 ```
 
-This creates the table `support_agent_questions` and a dataset object named
-`support_agent_questions_dataset` in the same database and schema. Snowflake refuses to create
-a dataset whose name already exists, so each run drops and re-registers the dataset, which
-keeps it in sync with the rebuilt table and makes `dbt build` repeatable.
+The ground truth is JSON with any of `ground_truth_output` (expected answer),
+`ground_truth_invocations` (expected tool calls) and any keys read by custom metrics.
+Snowflake needs the column to be a `VARIANT`. If yours is text (as it is for a seed), the
+package casts it with `TRY_PARSE_JSON` through a view named `<dataset_name>_source`, and your
+table is left untouched.
 
-### Defining the evaluation config
+### One evaluation per agent
 
-The model body **is** the evaluation YAML. Jinja is rendered first, so `ref()`, `var()` and the
-helper macros work. Use `cortex_agent_eval_dataset_name()` with `ref()` to point at the dataset;
-this also makes dbt deploy the dataset before the config. Do not add a `dataset:` block to the
-YAML, because Snowflake would try to re-create the dataset on every run.
+Each evaluation is its own model, so different agents (or different eval sets for the same
+agent) each get their own model, dataset name and table. Several evaluations can point at the
+same table. Nothing is shared unless you choose to share it.
 
-`models/evals/support_agent_eval.sql`:
+### Defining an evaluation
+
+The model body **is** Snowflake's evaluation YAML. Jinja is rendered first, so `ref()`,
+`source()`, `var()` and `this` all work. The `dataset:` block uses the same keys as Snowflake's
+YAML; the package registers it and then removes it from the uploaded file, so it is safe to
+run the evaluation repeatedly.
+
+`support_agent_eval.sql` (any `.sql` file in your models path):
 
 ```sql
 {{
@@ -446,6 +444,12 @@ YAML, because Snowflake would try to re-create the dataset on every run.
     stage        = '@my_db.my_schema.eval_stage'
   )
 }}
+dataset:
+  table_name: "{{ ref('support_agent_questions') }}"   # seed, source, or model
+  dataset_name: "support_agent_golden"                 # qualified with this model's db.schema if bare
+  column_mapping:
+    query_text: question
+    ground_truth: expected
 evaluation:
   agent_params:
     agent_name: "{{ ref('support_agent') }}"
@@ -456,25 +460,47 @@ evaluation:
     description: "Golden-set regression for the support agent"
   source_metadata:
     type: "dataset"
-    dataset_name: "{{ dbt_cortex_agent.cortex_agent_eval_dataset_name(ref('support_agent_questions')) }}"
+    dataset_name: "support_agent_golden"
 metrics:
   - "logical_consistency"
   - name: "answer_correctness"
     version: "v3"
   - name: "tool_selection_accuracy"
     version: "v3"
+  - name: "polite_tone"
+    model: "claude-sonnet-4-6"
+    score_ranges:
+      min_score: [0, 3]
+      median_score: [4, 6]
+      max_score: [7, 10]
+    prompt: |
+      {% raw %}Rate how polite {{output}} is for the question {{input}}.{% endraw %}
 ```
 
-At runtime the materialization runs `CREATE STAGE IF NOT EXISTS`, then writes the rendered YAML
-to `<stage>/evals/<model_alias>/config.yaml` with a single `COPY INTO` (no local file, so it also
-works under dbt Fusion). See the
+At runtime the materialization:
+
+1. registers the dataset with `SYSTEM$CREATE_EVALUATION_DATASET` (dropping any existing dataset
+   with the same name first, since Snowflake refuses to re-create one, and because the dataset is a
+   snapshot this also refreshes it after the table changes),
+2. runs `CREATE STAGE IF NOT EXISTS`, then
+3. writes the YAML, minus the `dataset:` block and with the qualified dataset name filled in, to
+   `<stage>/evals/<model_alias>/config.yaml` with a single `COPY INTO` (no local file, so it also
+   works under dbt Fusion).
+
+Omit the `dataset:` block to point `source_metadata.dataset_name` at a dataset you manage
+yourself. See the
 [YAML specification](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents-evaluations)
-for every supported key, including custom metrics.
+for every supported key.
+
+> **Custom metric prompts need `{% raw %}`.** Placeholders like `{{output}}`, `{{input}}` and
+> `{{ground_truth}}` are filled in by Snowflake, so wrap the prompt in `{% raw %} ... {% endraw %}`
+> or dbt will try to render them.
 
 ### Running an evaluation
 
 ```bash
-dbt build --select support_agent_questions support_agent_eval
+dbt seed --select support_agent_questions
+dbt build --select support_agent_eval
 
 # start a run and block until it finishes (non-zero exit unless COMPLETED)
 dbt run-operation run_cortex_agent_eval \
@@ -518,16 +544,17 @@ trend scores per run or agent version.
 |---------|----------|--------|-------------|
 | `stage` | Yes      | string | Fully-qualified stage path, e.g. `@my_db.my_schema.eval_stage`. |
 
-`cortex_agent_eval_dataset`:
-
-| Config                | Required | Type   | Default | Description |
-|-----------------------|----------|--------|---------|-------------|
-| `dataset_name`        | No       | string | `<alias>_dataset` | Name of the dataset object, created in the model's database and schema. |
-| `query_text_column`   | No       | string | `query_text` | Column holding the question. |
-| `ground_truth_column` | No       | string | `ground_truth` | `VARIANT` column holding the ground truth. |
-
 Configs can be set top-level or under `meta`. Standard dbt configs (`alias`, `tags`, `pre_hook`,
-`post_hook`, ...) work as usual.
+`post_hook`, ...) work as usual. The model `alias` becomes the folder name on the stage.
+
+`dataset:` block keys (all from Snowflake's YAML):
+
+| Key | Required | Description |
+|-----|----------|-------------|
+| `table_name` | Yes | Any table or view holding the questions, typically `{{ ref(...) }}` or `{{ source(...) }}`. |
+| `dataset_name` | Yes | Dataset object name. A bare name is created in this model's database and schema. |
+| `column_mapping.query_text` | Yes | Column holding the question. |
+| `column_mapping.ground_truth` | Yes | Column holding the ground-truth JSON (`VARIANT`, or text that is cast for you). |
 
 > **Notes.**
 > - **Privileges.** Running evaluations needs `SNOWFLAKE.CORTEX_USER`, `USAGE` and `MONITOR` (or
@@ -536,12 +563,14 @@ Configs can be set top-level or under `meta`. Standard dbt configs (`alias`, `ta
 >   `CREATED` indefinitely, so `wait: true` will time out. See the
 >   [access control requirements](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents-evaluations).
 > - The evaluation YAML must not contain `$$` (used as the SQL dollar-quote delimiter internally).
+> - The uploaded YAML is re-serialized when a `dataset:` block is present, so comments and key order
+>   are not preserved in the staged copy (its meaning is unchanged).
 > - Evaluations run in the agent's database and schema, and are not supported for agents that use
 >   row access policies or MCP connectors. See Snowflake's limitations for tool metrics.
 > - `timeout_seconds` is approximate: it is converted to a number of polls, and each poll also
 >   spends time on the status query.
 > - To remove a deployed config, run `REMOVE @<stage>/evals/<name>/config.yaml`. To drop a dataset,
->   run `DROP DATASET <name>`, or drop the model's table and dataset with dbt as usual.
+>   run `DROP DATASET <name>`.
 
 ---
 

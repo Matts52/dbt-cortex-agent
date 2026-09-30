@@ -1,10 +1,11 @@
 {#-
 --  cortex_agent_eval materialization
 --
---  Deploys a Cortex Agent evaluation config to a Snowflake named stage so it
---  can be executed with EXECUTE_AI_EVALUATION. Like cortex_skill, the model is
---  a *deployment* step for a stage file, not a SQL object: the model body IS the
---  evaluation YAML, and it is written to
+--  Deploys a Cortex Agent evaluation to Snowflake: registers its dataset (if the
+--  YAML declares one) and writes its config to a named stage so it can be run
+--  with EXECUTE_AI_EVALUATION. Like cortex_skill, the model is a *deployment*
+--  step for a stage file, not a SQL object. The model body IS the evaluation
+--  YAML, and it is written to
 --
 --      <stage>/evals/<model_alias>/config.yaml
 --
@@ -12,30 +13,47 @@
 --  asynchronous work, so this materialization never starts a run. Use the
 --  `run_cortex_agent_eval` run-operation for that.
 --
+--  Each eval is its own model, so different agents (or different eval sets for
+--  the same agent) simply get their own model, each pointing at whatever table
+--  holds its questions. The dataset can be ANY table or view in the project (a
+--  seed, source, or model): nothing is copied.
+--
+--  The body uses Snowflake's own evaluation YAML. The optional `dataset:` block
+--  is handled by the package instead of being sent to Snowflake: the dataset is
+--  (re-)registered here and the block is removed from the uploaded file, so
+--  repeated runs do not try to create the dataset again.
+--
 --  Required config:
 --      stage  string  Fully-qualified stage path, e.g. '@my_db.my_schema.eval_stage'
 --
---  Example (models/evals/support_agent_eval.sql):
+--  Example (any .sql file in your models path):
 --
 --      {{ config(
 --          materialized = 'cortex_agent_eval',
 --          meta         = {'stage': '@my_db.my_schema.eval_stage'}
 --      ) }}
+--      dataset:
+--        table_name: "{{ ref('support_questions') }}"   # seed, source, or model
+--        dataset_name: "support_agent_golden"
+--        column_mapping:
+--          query_text: question
+--          ground_truth: expected
 --      evaluation:
 --        agent_params:
 --          agent_name: "{{ ref('support_agent') }}"
 --          agent_type: "CORTEX AGENT"
---        run_params:
---          label: "nightly"
 --        source_metadata:
 --          type: "dataset"
---          dataset_name: "{{ dbt_cortex_agent.cortex_agent_eval_dataset_name(ref('support_agent_questions')) }}"
+--          dataset_name: "support_agent_golden"
 --      metrics:
 --        - "answer_correctness"
 --        - "logical_consistency"
 --
---  See macros/relations/cortex_agent_eval/create.sql for the upload SQL and
---  the README for usage and config options.
+--  Custom-metric prompts contain {{output}}-style placeholders that Snowflake
+--  fills in, so wrap them in {% raw %} ... {% endraw %} to stop dbt rendering them.
+--
+--  See macros/relations/cortex_agent_eval/create.sql for the dataset registration
+--  and upload SQL, and the README for usage and config options.
 -#}
 
 {% materialization cortex_agent_eval, adapter='snowflake' -%}
