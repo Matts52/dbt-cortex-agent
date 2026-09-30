@@ -179,6 +179,80 @@ Omitting the config key (or setting it to `false`) produces no `tools` entry.
 
 > **Note:** If your spec already contains a `tools:` block (e.g. for `cortex_search` or `cortex_analyst_text_to_sql`), set `web_search_tool = false` and add the entry directly in your spec's `tools:` list to avoid a duplicate key.
 
+### Enabling code execution
+
+> **Preview:** The code execution tool is in Public Preview as of August 20, 2026. Check the [Snowflake release notes](https://docs.snowflake.com/en/release-notes/2026/ui/2026-08-20) for any changes before using in production.
+
+Add `code_execution_tool = true` to give the agent a Python sandbox that can run calculations, process data with numpy/pandas/scipy, and generate matplotlib/plotly charts:
+
+```sql
+{{
+  config(
+    materialized        = 'cortex_agent',
+    code_execution_tool = true
+  )
+}}
+models:
+  orchestration: claude-4-sonnet
+instructions:
+  response: "Be concise."
+  orchestration: "Use the code execution tool to perform calculations and data analysis."
+```
+
+This injects a `tool_spec` entry and an empty `tool_resources.code_execution` block into the spec:
+
+```yaml
+tools:
+  - tool_spec:
+      type: "code_execution"
+      name: "code_execution"
+tool_resources:
+  code_execution: {}
+```
+
+**Map form** — pass a dict to configure `permission_policy` or allow PyPI packages via `artifact_repositories`:
+
+```sql
+{{
+  config(
+    materialized        = 'cortex_agent',
+    code_execution_tool = {
+      'permission_policy':      'always_allow',
+      'artifact_repositories':  ['SNOWFLAKE.SNOWPARK.PYPI_SHARED_REPOSITORY']
+    }
+  )
+}}
+```
+
+- `permission_policy`: `'always_ask'` (default — prompts before state-modifying operations) or `'always_allow'`.
+- `artifact_repositories`: list of repository identifiers. To use `SNOWFLAKE.SNOWPARK.PYPI_SHARED_REPOSITORY`, the agent owner needs the `SNOWFLAKE.PYPI_REPOSITORY_USER` role.
+
+**Composing with other tools** — unlike `web_search_tool`, the `code_execution_tool` shorthand uses YAML parse-and-merge, so it is safe to use alongside an existing `tools:` block in the spec body. The two tool entries are merged into a single `tools:` list with no duplicate keys:
+
+```sql
+{{
+  config(
+    materialized        = 'cortex_agent',
+    code_execution_tool = true
+  )
+}}
+tools:
+  - tool_spec:
+      type: "cortex_search"
+      name: "PolicySearch"
+      description: "Searches policy documents."
+tool_resources:
+  PolicySearch:
+    name: "my_db.my_schema.my_search_service"
+    max_results: 5
+```
+
+**Required privileges:** `MODIFY` on the agent to configure the tool; `USAGE` to invoke it at runtime.
+
+**Limitation:** `code_execution` and `code_toolset_all` are mutually exclusive. Setting `code_execution_tool = true` while the spec body declares a `code_toolset_all` tool raises a compile-time error.
+
+> **Note:** `code_execution_tool` is ignored with a warning when `raw_ddl=true`. Add the tool entries directly in the spec's `tools:` and `tool_resources:` blocks instead.
+
 ### 2. Raw DDL mode (`raw_ddl=true`)
 
 The body is **everything that follows `CREATE OR REPLACE AGENT <name>`** — a
@@ -785,7 +859,8 @@ identity already provides it.
 | `comment`         | specification   | string         | Sets the agent-level `COMMENT` clause. Single quotes are escaped automatically. |
 | `profile`         | specification   | dict or string | Sets the `PROFILE` clause. A dict is serialized to JSON for you (`display_name`, `avatar`, `color`); a string is used verbatim. |
 | `web_search_tool` | specification   | bool (default `false`) | When `true`, injects a `tool_spec` entry for web search into the agent specification YAML, enabling live web search for the agent. If your spec already has a `tools:` block, add the entry there directly instead. |
-| `raw_ddl`         | both            | bool (default `false`) | When `true`, the model body is treated as raw DDL appended after `CREATE OR REPLACE AGENT <name>`, and `comment` / `profile` / `web_search_tool` configs are ignored (a compile-time warning is emitted if any of these are set). |
+| `code_execution_tool` | specification | bool or dict (default `false`) | When `true`, injects a `code_execution` tool entry and an empty `tool_resources.code_execution` block into the spec using YAML parse-and-merge (safe with existing `tools:` blocks). Pass a dict to set `permission_policy` (`'always_ask'` or `'always_allow'`) and/or `artifact_repositories`. Mutually exclusive with `code_toolset_all` in the spec body. Preview feature as of August 2026. |
+| `raw_ddl`         | both            | bool (default `false`) | When `true`, the model body is treated as raw DDL appended after `CREATE OR REPLACE AGENT <name>`, and `comment` / `profile` / `web_search_tool` / `code_execution_tool` configs are ignored (a compile-time warning is emitted if any of these are set). |
 | `versioning`      | specification   | bool (default `false`) | Master switch for versioned mode. When `true`, creates the agent once and then commits each changed spec as a new version (`MODIFY LIVE VERSION` + `COMMIT`) instead of `CREATE OR REPLACE`. Incompatible with `raw_ddl=true` (a warning is emitted and the run falls back to `CREATE OR REPLACE`). Switching back to `false` runs `CREATE OR REPLACE`, which wipes the version history and aliases. |
 | `version_name`    | specification (versioning=true) | string | Alias to tag the newly committed version with (Snowflake names the version itself, `VERSION$<n>`). Must be a valid unquoted identifier (`^[A-Za-z_][A-Za-z0-9_$]*$`, checked at compile time); stored uppercased; unique per agent — reusing one moves it to the new version. When omitted, auto-generated as `v_YYYYMMDD_HHMMSS` from `run_started_at` — deterministic within a run. |
 | `set_default`     | specification (versioning=true) | bool (default `true`) | When `true`, pins the agent's `DEFAULT VERSION` to the newly committed version (or to the newest version, if the spec is unchanged). Set `false` to commit a staging/canary version without affecting live traffic — the current default is pinned first. |

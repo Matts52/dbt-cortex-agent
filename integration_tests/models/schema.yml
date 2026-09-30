@@ -50,3 +50,9 @@ models:
 
   - name: agent_eval
     description: "Evaluation config for agent_eval_target, written to a named stage by the cortex_agent_eval materialization. Its dataset: block registers the agent_eval_questions seed as an evaluation dataset. Does not start a run."
+
+  - name: agent_with_code_execution
+    description: "Cortex Agent with code_execution_tool=true (boolean shorthand). Verifies that the tool and an empty tool_resources.code_execution entry are injected into the spec."
+
+  - name: agent_with_code_execution_options
+    description: "Cortex Agent with code_execution_tool map form (permission_policy + artifact_repositories) combined with an existing tools: block. Verifies that both tool entries and both tool_resources entries are present with no duplicate keys."

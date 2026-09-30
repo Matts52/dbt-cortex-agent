@@ -164,8 +164,10 @@ macros:
     description: >
       Renders the full specification YAML for specification mode: the model
       body plus the config-injected `models:` / `orchestration:` blocks, the
-      web_search tool and `mcp_servers:`. Shared by the CREATE OR REPLACE and
-      versioning paths so every config behaves the same in both.
+      web_search tool, `mcp_servers:`, and the code_execution tool. Shared by
+      the CREATE OR REPLACE and versioning paths so every config behaves the
+      same in both. The code_execution_tool injection uses YAML parse-and-merge
+      (fromyaml/toyaml) so it composes safely with an existing tools: block.
     arguments:
       - name: sql
         type: string
