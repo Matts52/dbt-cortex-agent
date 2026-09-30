@@ -182,9 +182,10 @@ macros:
       Renders the full specification YAML for specification mode: the model
       body plus the config-injected `models:` block (from `model`), merged
       `orchestration:` block (from `budget` and/or `analytical_search` via
-      YAML parse-and-merge), the web_search tool, and `mcp_servers:`.
-      Shared by the CREATE OR REPLACE and versioning paths so every config
-      behaves the same in both.
+      YAML parse-and-merge), the web_search tool, `mcp_servers:`, and the
+      code_execution tool (also via YAML parse-and-merge, so it composes
+      safely with an existing tools: block). Shared by the CREATE OR REPLACE
+      and versioning paths so every config behaves the same in both.
     arguments:
       - name: sql
         type: string

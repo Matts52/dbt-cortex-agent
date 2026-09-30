@@ -220,14 +220,16 @@
   {%- set budget = _m if _m is not none else config.get('budget', default=none) -%}
   {%- set _m = config.get('meta', {}).get('mcp_servers') -%}
   {%- set mcp_servers = _m if _m is not none else config.get('mcp_servers', default=[]) -%}
+  {%- set _m = config.get('meta', {}).get('code_execution_tool') -%}
+  {%- set code_execution_tool = _m if _m is not none else config.get('code_execution_tool', default=false) -%}
 
   {%- set _m = config.get('meta', {}).get('analytical_search') -%}
   {%- set analytical_search = _m if _m is not none else config.get('analytical_search', default=false) -%}
 
   {%- if raw_ddl -%}
 
-    {%- if web_search_tool or comment is not none or profile is not none or model is not none or budget is not none or mcp_servers | length > 0 or analytical_search -%}
-      {{ exceptions.warn("cortex_agent: web_search_tool, comment, profile, model, budget, mcp_servers, and analytical_search configs are ignored when raw_ddl=true. Add these directly to your DDL body.") }}
+    {%- if web_search_tool or code_execution_tool or comment is not none or profile is not none or model is not none or budget is not none or mcp_servers | length > 0 or analytical_search -%}
+      {{ exceptions.warn("cortex_agent: web_search_tool, code_execution_tool, comment, profile, model, budget, mcp_servers, and analytical_search configs are ignored when raw_ddl=true. Add these directly to your DDL body.") }}
     {%- endif -%}
 
     create or replace agent {{ relation }}
@@ -255,8 +257,9 @@ $${{ '\n' }}{{ dbt_cortex_agent.cortex_agent_render_spec_body(sql) }}{{ '\n' }}$
 --  Render the full specification YAML for specification mode: the model body
 --  plus the config-injected `models:` / `orchestration:` blocks (from the
 --  `model` / `budget` / `analytical_search` configs), the web_search tool,
---  and `mcp_servers:`. Shared by the CREATE OR REPLACE path and the
---  versioning path so every config behaves the same in both.
+--  `mcp_servers:`, and the code_execution tool. Shared by the CREATE OR
+--  REPLACE path and the versioning path so every config behaves the same
+--  in both.
 --
 --  Args:
 --  - sql: str — the compiled model body (agent specification YAML)
@@ -270,6 +273,8 @@ $${{ '\n' }}{{ dbt_cortex_agent.cortex_agent_render_spec_body(sql) }}{{ '\n' }}$
   {%- set budget = _m if _m is not none else config.get('budget', default=none) -%}
   {%- set _m = config.get('meta', {}).get('mcp_servers') -%}
   {%- set mcp_servers = _m if _m is not none else config.get('mcp_servers', default=[]) -%}
+  {%- set _m = config.get('meta', {}).get('code_execution_tool') -%}
+  {%- set code_execution_tool = _m if _m is not none else config.get('code_execution_tool', default=false) -%}
   {%- set _m = config.get('meta', {}).get('analytical_search') -%}
   {%- set analytical_search = _m if _m is not none else config.get('analytical_search', default=false) -%}
 
@@ -293,6 +298,42 @@ $${{ '\n' }}{{ dbt_cortex_agent.cortex_agent_render_spec_body(sql) }}{{ '\n' }}$
       {%- set mcp_block = mcp_block ~ '  - server_spec:\n      name: "' ~ server ~ '"\n' -%}
     {%- endfor -%}
     {%- set sql = sql ~ mcp_block -%}
+  {%- endif -%}
+
+  {%- if code_execution_tool -%}
+    {%- if code_execution_tool is mapping and code_execution_tool.permission_policy is defined -%}
+      {%- if code_execution_tool.permission_policy not in ['always_ask', 'always_allow'] -%}
+        {{ exceptions.raise_compiler_error("cortex_agent: code_execution_tool.permission_policy must be 'always_ask' or 'always_allow', got: '" ~ code_execution_tool.permission_policy ~ "'.") }}
+      {%- endif -%}
+    {%- endif -%}
+
+    {%- set spec = modules.yaml.safe_load(sql) or {} -%}
+
+    {%- for entry in spec.get('tools', []) -%}
+      {%- if entry.get('tool_spec', {}).get('type') == 'code_toolset_all' -%}
+        {{ exceptions.raise_compiler_error("cortex_agent: code_execution_tool is incompatible with a 'code_toolset_all' tool_spec in the spec body. The two tool types are mutually exclusive; use one or the other.") }}
+      {%- endif -%}
+    {%- endfor -%}
+
+    {%- set tools_list = spec.get('tools', []) -%}
+    {%- do tools_list.append({'tool_spec': {'type': 'code_execution', 'name': 'code_execution'}}) -%}
+    {%- do spec.update({'tools': tools_list}) -%}
+
+    {%- set ce_resource = {} -%}
+    {%- if code_execution_tool is mapping -%}
+      {%- if code_execution_tool.permission_policy is defined -%}
+        {%- do ce_resource.update({'permission_policy': {'type': code_execution_tool.permission_policy}}) -%}
+      {%- endif -%}
+      {%- if code_execution_tool.artifact_repositories is defined -%}
+        {%- do ce_resource.update({'artifact_repositories': code_execution_tool.artifact_repositories}) -%}
+      {%- endif -%}
+    {%- endif -%}
+
+    {%- set tool_resources = spec.get('tool_resources', {}) -%}
+    {%- do tool_resources.update({'code_execution': ce_resource}) -%}
+    {%- do spec.update({'tool_resources': tool_resources}) -%}
+
+    {%- set sql = modules.yaml.safe_dump(spec, sort_keys=false) -%}
   {%- endif -%}
 
   {%- set sql = dbt_cortex_agent.cortex_agent_merge_orchestration(sql, budget, analytical_search) -%}
