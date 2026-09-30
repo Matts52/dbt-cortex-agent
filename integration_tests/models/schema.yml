@@ -27,6 +27,9 @@ models:
   - name: agent_with_search
     description: "Cortex Agent with a Cortex Search tool; verifies full tool_resources syntax including filter, max_results, title_column, id_column."
 
+  - name: agent_with_analytical_search
+    description: "Cortex Agent with analytical_search=true and budget set; verifies that both configs are merged into a single orchestration: block via YAML parse-and-merge."
+
   - name: forecaster_skill
     description: "Cortex skill whose directory (SKILL.md + any companion scripts) is uploaded to a named stage by the cortex_skill materialization."
 

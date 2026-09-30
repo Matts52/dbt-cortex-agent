@@ -142,6 +142,64 @@ $$
 > managed elsewhere in your project. This makes the agent a proper downstream
 > node in your lineage graph.
 
+### Enabling analytical search (Preview)
+
+[Analytical search](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents-analytical-search)
+is a capability flag that tells the Cortex Agent orchestrator to run an extended analytics loop
+over Cortex Search results: after narrowing the candidate set with Cortex Search, the agent
+applies `AI_FILTER`, `AI_EXTRACT`, and `AI_AGG` SQL functions to support filtered lists,
+aggregates, and temporal analysis queries. It is off by default and **billed through AI
+functions** in addition to standard Cortex Search costs.
+
+> **Preview.** Analytical search is available in Snowflake Public Preview. Feature availability
+> and syntax may change before GA.
+
+Add `analytical_search = true` to enable it. The package merges
+`orchestration.capabilities.analytical_search: true` into the spec via YAML parse-and-merge,
+so it composes correctly with any `orchestration:` block already in the body and with the
+`budget` config shorthand — no duplicate YAML keys.
+
+```sql
+{{
+  config(
+    materialized      = 'cortex_agent',
+    analytical_search = true,
+    budget            = {'seconds': 30, 'tokens': 16000}
+  )
+}}
+instructions:
+  response: "Analyze search results thoroughly."
+tools:
+  - tool_spec:
+      type: "cortex_search"
+      name: "PolicySearch"
+      description: "Searches policy documents."
+tool_resources:
+  PolicySearch:
+    name: "{{ source('cortex', 'policy_search_service') }}"
+    max_results: 1000
+```
+
+This compiles `analytical_search` and `budget` into a single `orchestration:` block:
+
+```yaml
+orchestration:
+  budget:
+    seconds: 30
+    tokens: 16000
+  capabilities:
+    analytical_search: true
+```
+
+> **Tip — `max_results`.** Snowflake's analytical search documentation recommends setting
+> `max_results: 1000` on the search tool to give the analytics loop a large enough candidate
+> set to aggregate over. The default (`5`) is appropriate for retrieval but too small for
+> aggregation queries.
+
+A compile-time warning is emitted if `analytical_search = true` is set but the spec has no
+`cortex_search` tool, since the flag has no effect without one. The config is ignored (with a
+warning) under `raw_ddl = true`.
+
 ### Enabling web search
 
 Add `web_search_tool = true` to the config block to give the agent access to
@@ -858,9 +916,10 @@ identity already provides it.
 |-------------------|-----------------|----------------|-------------|
 | `comment`         | specification   | string         | Sets the agent-level `COMMENT` clause. Single quotes are escaped automatically. |
 | `profile`         | specification   | dict or string | Sets the `PROFILE` clause. A dict is serialized to JSON for you (`display_name`, `avatar`, `color`); a string is used verbatim. |
-| `web_search_tool` | specification   | bool (default `false`) | When `true`, injects a `tool_spec` entry for web search into the agent specification YAML, enabling live web search for the agent. If your spec already has a `tools:` block, add the entry there directly instead. |
-| `code_execution_tool` | specification | bool or dict (default `false`) | When `true`, injects a `code_execution` tool entry and an empty `tool_resources.code_execution` block into the spec using YAML parse-and-merge (safe with existing `tools:` blocks). Pass a dict to set `permission_policy` (`'always_ask'` or `'always_allow'`) and/or `artifact_repositories`. Mutually exclusive with `code_toolset_all` in the spec body. Preview feature as of August 2026. |
-| `raw_ddl`         | both            | bool (default `false`) | When `true`, the model body is treated as raw DDL appended after `CREATE OR REPLACE AGENT <name>`, and `comment` / `profile` / `web_search_tool` / `code_execution_tool` configs are ignored (a compile-time warning is emitted if any of these are set). |
+| `web_search_tool`     | specification   | bool (default `false`) | When `true`, injects a `tool_spec` entry for web search into the agent specification YAML, enabling live web search for the agent. If your spec already has a `tools:` block, add the entry there directly instead. |
+| `analytical_search`   | specification   | bool (default `false`) | When `true`, merges `orchestration.capabilities.analytical_search: true` into the spec via YAML parse-and-merge. Composes correctly with the `budget` config and with an `orchestration:` block in the body. Requires a `cortex_search` tool in the spec (a warning is emitted if none is found). **Preview** — additional AI function charges apply. Ignored under `raw_ddl = true`. |
+| `code_execution_tool` | specification   | bool or dict (default `false`) | When `true`, injects a `code_execution` tool entry and an empty `tool_resources.code_execution` block into the spec using YAML parse-and-merge (safe with existing `tools:` blocks). Pass a dict to set `permission_policy` (`'always_ask'` or `'always_allow'`) and/or `artifact_repositories`. Mutually exclusive with `code_toolset_all` in the spec body. Preview feature as of August 2026. |
+| `raw_ddl`             | both            | bool (default `false`) | When `true`, the model body is treated as raw DDL appended after `CREATE OR REPLACE AGENT <name>`, and `comment` / `profile` / `web_search_tool` / `analytical_search` / `code_execution_tool` configs are ignored (a compile-time warning is emitted if any of these are set). |
 | `versioning`      | specification   | bool (default `false`) | Master switch for versioned mode. When `true`, creates the agent once and then commits each changed spec as a new version (`MODIFY LIVE VERSION` + `COMMIT`) instead of `CREATE OR REPLACE`. Incompatible with `raw_ddl=true` (a warning is emitted and the run falls back to `CREATE OR REPLACE`). Switching back to `false` runs `CREATE OR REPLACE`, which wipes the version history and aliases. |
 | `version_name`    | specification (versioning=true) | string | Alias to tag the newly committed version with (Snowflake names the version itself, `VERSION$<n>`). Must be a valid unquoted identifier (`^[A-Za-z_][A-Za-z0-9_$]*$`, checked at compile time); stored uppercased; unique per agent — reusing one moves it to the new version. When omitted, auto-generated as `v_YYYYMMDD_HHMMSS` from `run_started_at` — deterministic within a run. |
 | `set_default`     | specification (versioning=true) | bool (default `true`) | When `true`, pins the agent's `DEFAULT VERSION` to the newly committed version (or to the newest version, if the spec is unchanged). Set `false` to commit a staging/canary version without affecting live traffic — the current default is pinned first. |

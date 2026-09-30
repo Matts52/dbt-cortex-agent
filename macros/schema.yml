@@ -16,8 +16,8 @@ macros:
 
       - Specification mode (default, `raw_ddl=false`): wraps the model body in
         `FROM SPECIFICATION $$ ... $$`, emits the optional `COMMENT` and
-        `PROFILE` clauses from config, and prepends any `model` / `budget`
-        config values as YAML inside the spec body.
+        `PROFILE` clauses from config, and merges any `model` / `budget` /
+        `analytical_search` config values as YAML inside the spec body.
 
       - Raw DDL mode (`raw_ddl=true`): treats the model body as everything
         following `CREATE OR REPLACE AGENT <name>` and passes it through
@@ -131,22 +131,39 @@ macros:
 
   - name: cortex_agent_render_model_and_budget
     description: >
-      Renders the `models:` and `orchestration:` YAML blocks that are prepended
-      to the spec body when the `model` and/or `budget` materialization configs
-      are set. Returns an empty string when both inputs are none, so it is safe
-      to call unconditionally.
+      Renders the `models:` YAML block prepended to the spec body when the
+      `model` config is set. Returns an empty string when model is none.
+      Orchestration merging (budget, analytical_search) is handled by
+      `cortex_agent_merge_orchestration`.
     arguments:
       - name: model
         type: string
         description: >
           The orchestration model name, e.g. 'claude-opus-4'. Produces
           `models:\n  orchestration: <value>` in the spec YAML.
+
+  - name: cortex_agent_merge_orchestration
+    description: >
+      Merges orchestration config values into the spec body YAML using
+      parse-and-reserialize (modules.yaml.safe_load / safe_dump), so they
+      compose correctly with any existing `orchestration:` block in the body
+      without producing duplicate top-level keys. Returns sql unchanged when
+      neither budget nor analytical_search is set.
+    arguments:
+      - name: sql
+        type: string
+        description: The accumulated spec YAML (after web_search/mcp appends).
       - name: budget
         type: any
         description: >
           Spending limit for the orchestrator. A plain number is shorthand for
           {seconds: <value>}. A dict may contain `seconds` and/or `tokens` keys.
-          Produces an `orchestration:\n  budget:` block in the spec YAML.
+          Merged under `orchestration.budget` in the spec YAML.
+      - name: analytical_search
+        type: boolean
+        description: >
+          When true, sets `orchestration.capabilities.analytical_search: true`
+          in the spec YAML. Has no effect without a cortex_search tool in the spec.
 
   - name: cortex_agent_render_profile
     description: >
@@ -163,11 +180,12 @@ macros:
   - name: cortex_agent_render_spec_body
     description: >
       Renders the full specification YAML for specification mode: the model
-      body plus the config-injected `models:` / `orchestration:` blocks, the
-      web_search tool, `mcp_servers:`, and the code_execution tool. Shared by
-      the CREATE OR REPLACE and versioning paths so every config behaves the
-      same in both. The code_execution_tool injection uses YAML parse-and-merge
-      (fromyaml/toyaml) so it composes safely with an existing tools: block.
+      body plus the config-injected `models:` block (from `model`), merged
+      `orchestration:` block (from `budget` and/or `analytical_search` via
+      YAML parse-and-merge), the web_search tool, `mcp_servers:`, and the
+      code_execution tool (also via YAML parse-and-merge, so it composes
+      safely with an existing tools: block). Shared by the CREATE OR REPLACE
+      and versioning paths so every config behaves the same in both.
     arguments:
       - name: sql
         type: string
