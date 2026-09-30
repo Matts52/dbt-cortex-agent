@@ -18,7 +18,7 @@ Currently, as Cortex Agents are only available on the Snowflake adapter, this pa
 
 ## At a glance
 
-- **Materializations:** `cortex_agent`, `cortex_skill`, `cortex_mcp_server`, `cortex_mcp_api_integration`
+- **Materializations:** `cortex_agent`, `cortex_skill`, `cortex_agent_eval_dataset`, `cortex_agent_eval`, `cortex_mcp_server`, `cortex_mcp_api_integration`
 - **Warehouse:** Snowflake (Cortex Agents)
 - **dbt compatibility:** dbt 1.5+
 - **Underlying DDL:** [`CREATE AGENT`](https://docs.snowflake.com/en/sql-reference/sql/create-agent) / `PUT 'file://...' @stage`
@@ -384,6 +384,167 @@ as usual. The model `alias` becomes the skill folder name on the stage.
 
 ---
 
+## Evaluations (`cortex_agent_eval_dataset` and `cortex_agent_eval`)
+
+[Cortex Agent evaluations](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents-evaluations)
+score an agent against a golden question set with system and custom LLM-judge metrics.
+Snowflake has no `CREATE EVALUATION` statement. An evaluation is driven by an **evaluation
+dataset**, a **YAML config file on a stage**, and the `EXECUTE_AI_EVALUATION` procedure.
+
+The package follows the same deploy model as skills: `dbt build` deploys the dataset and the
+config (in dependency order, after the agent they point at), and running an evaluation is a
+separate, explicit step. Runs call LLM judges and are billed, and they are asynchronous, so
+they are deliberately **not** part of `dbt build`.
+
+| Piece | dbt construct | What it does |
+|-------|---------------|--------------|
+| Golden question set | `cortex_agent_eval_dataset` model | Builds a table and registers it with `SYSTEM$CREATE_EVALUATION_DATASET` |
+| Evaluation config | `cortex_agent_eval` model | Writes the model body (the evaluation YAML) to a stage file |
+| Run / poll / cancel / delete | `run-operation` macros | Wrap `EXECUTE_AI_EVALUATION` |
+| Results | `cortex_agent_eval_results()` macro | Returns a `SELECT` over `GET_AI_EVALUATION_DATA` |
+
+### Defining the dataset
+
+The model body is a `SELECT` returning the question and its ground truth. `ground_truth` must
+be a `VARIANT`, with any of `ground_truth_output` (expected answer), `ground_truth_invocations`
+(expected tool calls) and any keys read by custom metrics.
+
+`models/evals/support_agent_questions.sql`:
+
+```sql
+{{ config(materialized = 'cortex_agent_eval_dataset') }}
+
+select 'What is our refund window?' as query_text,
+       parse_json('{"ground_truth_output": "30 days"}') as ground_truth
+union all
+select 'Which tool answers revenue questions?' as query_text,
+       parse_json('{
+         "ground_truth_invocations": [
+           {"tool_name": "Analyst1", "tool_input": "revenue by quarter", "tool_output": "revenue table"}
+         ]
+       }') as ground_truth
+```
+
+This creates the table `support_agent_questions` and a dataset object named
+`support_agent_questions_dataset` in the same database and schema. Snowflake refuses to create
+a dataset whose name already exists, so each run drops and re-registers the dataset, which
+keeps it in sync with the rebuilt table and makes `dbt build` repeatable.
+
+### Defining the evaluation config
+
+The model body **is** the evaluation YAML. Jinja is rendered first, so `ref()`, `var()` and the
+helper macros work. Use `cortex_agent_eval_dataset_name()` with `ref()` to point at the dataset;
+this also makes dbt deploy the dataset before the config. Do not add a `dataset:` block to the
+YAML, because Snowflake would try to re-create the dataset on every run.
+
+`models/evals/support_agent_eval.sql`:
+
+```sql
+{{
+  config(
+    materialized = 'cortex_agent_eval',
+    stage        = '@my_db.my_schema.eval_stage'
+  )
+}}
+evaluation:
+  agent_params:
+    agent_name: "{{ ref('support_agent') }}"
+    agent_type: "CORTEX AGENT"
+    agent_version: "{{ var('agent_version', 'LIVE') }}"
+  run_params:
+    label: "nightly"
+    description: "Golden-set regression for the support agent"
+  source_metadata:
+    type: "dataset"
+    dataset_name: "{{ dbt_cortex_agent.cortex_agent_eval_dataset_name(ref('support_agent_questions')) }}"
+metrics:
+  - "logical_consistency"
+  - name: "answer_correctness"
+    version: "v3"
+  - name: "tool_selection_accuracy"
+    version: "v3"
+```
+
+At runtime the materialization runs `CREATE STAGE IF NOT EXISTS`, then writes the rendered YAML
+to `<stage>/evals/<model_alias>/config.yaml` with a single `COPY INTO` (no local file, so it also
+works under dbt Fusion). See the
+[YAML specification](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents-evaluations)
+for every supported key, including custom metrics.
+
+### Running an evaluation
+
+```bash
+dbt build --select support_agent_questions support_agent_eval
+
+# start a run and block until it finishes (non-zero exit unless COMPLETED)
+dbt run-operation run_cortex_agent_eval \
+  --args '{eval: support_agent_eval, run_name: nightly-1, wait: true}'
+```
+
+| Operation | Args | Description |
+|-----------|------|-------------|
+| `run_cortex_agent_eval` | `eval`, `run_name` (default `<eval>_<UTC timestamp>`), `wait` (default `false`), `timeout_seconds` (default `1800`), `poll_seconds` (default `15`) | Starts a run. With `wait: true` it polls until a terminal state and fails the operation unless the run is `COMPLETED`, so it can gate CI. |
+| `cortex_agent_eval_status` | `eval`, `run_name` | Prints the run's status. |
+| `cancel_cortex_agent_eval` | `eval`, `run_name` | Cancels an in-progress run. |
+| `delete_cortex_agent_eval_run` | `eval`, `run_name` | Deletes a run and its results. |
+
+`eval` is a `cortex_agent_eval` model name, or a full stage path to a config file
+(`@db.schema.stage/path/config.yaml`). `run_name` may contain letters, digits, `_`, `.` and `-`, and
+must be unique per agent. Statuses progress `CREATED`, `INVOCATION_IN_PROGRESS`,
+`INVOCATION_COMPLETED`, `COMPUTATION_IN_PROGRESS`, `COMPLETED`. The terminal states are
+`COMPLETED`, `PARTIALLY_COMPLETED`, `CANCELLED` and `FAILED`. `FAILED` is not in Snowflake's
+documented list but is returned when the agent invocation fails.
+
+To evaluate a specific agent version in CI, template `agent_version` in the YAML (as above) and
+rebuild the config with `dbt build --select support_agent_eval --vars '{agent_version: VERSION$3}'`
+before running it.
+
+### Reading results
+
+```sql
+select metric_name, avg(eval_agg_score) as avg_score
+from ({{ dbt_cortex_agent.cortex_agent_eval_results(ref('support_agent'), 'nightly-1') }})
+group by 1
+```
+
+This wraps `SNOWFLAKE.LOCAL.GET_AI_EVALUATION_DATA`. Land the output in an incremental model to
+trend scores per run or agent version.
+
+### Configuration reference
+
+`cortex_agent_eval`:
+
+| Config  | Required | Type   | Description |
+|---------|----------|--------|-------------|
+| `stage` | Yes      | string | Fully-qualified stage path, e.g. `@my_db.my_schema.eval_stage`. |
+
+`cortex_agent_eval_dataset`:
+
+| Config                | Required | Type   | Default | Description |
+|-----------------------|----------|--------|---------|-------------|
+| `dataset_name`        | No       | string | `<alias>_dataset` | Name of the dataset object, created in the model's database and schema. |
+| `query_text_column`   | No       | string | `query_text` | Column holding the question. |
+| `ground_truth_column` | No       | string | `ground_truth` | `VARIANT` column holding the ground truth. |
+
+Configs can be set top-level or under `meta`. Standard dbt configs (`alias`, `tags`, `pre_hook`,
+`post_hook`, ...) work as usual.
+
+> **Notes.**
+> - **Privileges.** Running evaluations needs `SNOWFLAKE.CORTEX_USER`, `USAGE` and `MONITOR` (or
+>   `OWNERSHIP`) on the agent, `CREATE DATASET` and `CREATE STAGE` on the schema, and
+>   **`EXECUTE TASK ON ACCOUNT`**. Without `EXECUTE TASK`, `START` succeeds but the run stays in
+>   `CREATED` indefinitely, so `wait: true` will time out. See the
+>   [access control requirements](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents-evaluations).
+> - The evaluation YAML must not contain `$$` (used as the SQL dollar-quote delimiter internally).
+> - Evaluations run in the agent's database and schema, and are not supported for agents that use
+>   row access policies or MCP connectors. See Snowflake's limitations for tool metrics.
+> - `timeout_seconds` is approximate: it is converted to a number of polls, and each poll also
+>   spends time on the status query.
+> - To remove a deployed config, run `REMOVE @<stage>/evals/<name>/config.yaml`. To drop a dataset,
+>   run `DROP DATASET <name>`, or drop the model's table and dataset with dbt as usual.
+
+---
+
 ## `cortex_mcp_server` — External MCP servers
 
 The `cortex_mcp_server` materialization creates a Snowflake **External MCP Server**
@@ -684,6 +845,7 @@ A runnable integration-test project lives in `integration_tests/`. See
 - [CREATE AGENT — Snowflake SQL reference](https://docs.snowflake.com/en/sql-reference/sql/create-agent)
 - [Cortex Agents — overview](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents)
 - [Configure and interact with Agents](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents-manage)
+- [Cortex Agent evaluations](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents-evaluations)
 - [dbt_semantic_view (design inspiration)](https://github.com/Snowflake-Labs/dbt_semantic_view)
 
 ## License

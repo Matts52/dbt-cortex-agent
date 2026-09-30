@@ -44,3 +44,12 @@ models:
 
   - name: agent_with_mcp_server
     description: "Cortex Agent that references example_mcp_server via cortex_mcp_server_name(ref(...)). Verifies DAG wiring and mcp_servers: spec injection."
+
+  - name: agent_eval_target
+    description: "Tool-free Cortex Agent that agent_eval evaluates."
+
+  - name: agent_eval_questions
+    description: "Golden question set materialized as a table and registered as a Cortex Agent evaluation dataset by the cortex_agent_eval_dataset materialization."
+
+  - name: agent_eval
+    description: "Evaluation config for agent_eval_target, written to a named stage by the cortex_agent_eval materialization. Does not start a run."
