@@ -9,6 +9,20 @@
 {%- endmacro %}
 
 
+{% macro _cortex_eval_unwrap_empty_ref(value) -%}
+{#-
+--  dbt renders ref() and source() as a subquery under `--empty`:
+--    (select * from <db>.<schema>.<table> where false limit 0)
+--  Strip that wrapper so identifier-position values stay plain relation names.
+-#}
+  {%- set s = value | string | trim -%}
+  {%- set match = modules.re.match(
+      '^\\(select \\* from (.+?)(?: where false)? limit 0\\)$', s
+  ) -%}
+  {{- return(match.group(1) if match else s) -}}
+{%- endmacro %}
+
+
 {% macro cortex_agent_eval__config_path(stage, identifier) -%}
 {#-
 --  Stage path of the config file deployed for a cortex_agent_eval model.
@@ -48,6 +62,17 @@
     {{ exceptions.raise_compiler_error(
         "cortex_agent_eval: the model body must be an evaluation YAML with top-level 'evaluation' and 'metrics' keys."
     ) }}
+  {%- endif -%}
+
+  {#- unwrap --empty ref() subquery rendering in name fields -#}
+  {%- set _eval = parsed['evaluation'] -%}
+  {%- set _ap = _eval.get('agent_params', {}) -%}
+  {%- if 'agent_name' in _ap -%}
+    {%- do _ap.update({'agent_name': dbt_cortex_agent._cortex_eval_unwrap_empty_ref(_ap['agent_name'])}) -%}
+  {%- endif -%}
+  {%- set _sm = _eval.get('source_metadata', {}) -%}
+  {%- if 'dataset_name' in _sm -%}
+    {%- do _sm.update({'dataset_name': dbt_cortex_agent._cortex_eval_unwrap_empty_ref(_sm['dataset_name'])}) -%}
   {%- endif -%}
 
   {{ run_hooks(pre_hooks) }}
@@ -127,10 +152,10 @@
     {%- endif -%}
   {%- endfor -%}
 
-  {%- set raw_name = dataset['dataset_name'] | string -%}
+  {%- set raw_name = dbt_cortex_agent._cortex_eval_unwrap_empty_ref(dataset['dataset_name'] | string) -%}
   {%- set dataset_name = raw_name if '.' in raw_name
         else model_relation.database ~ '.' ~ model_relation.schema ~ '.' ~ raw_name -%}
-  {%- set table_name = dataset['table_name'] | string -%}
+  {%- set table_name = dbt_cortex_agent._cortex_eval_unwrap_empty_ref(dataset['table_name'] | string) -%}
   {%- set query_col = mapping['query_text'] | string -%}
   {%- set truth_col = mapping['ground_truth'] | string -%}
 
