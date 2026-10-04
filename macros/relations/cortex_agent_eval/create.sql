@@ -17,8 +17,7 @@
 -#}
   {%- set s = value | string | trim -%}
   {%- set match = modules.re.match(
-      r'^\(select \* from (.+?)(?: where false)? limit 0\)$', s,
-      modules.re.IGNORECASE
+      '^\\(select \\* from (.+?)(?: where false)? limit 0\\)$', s
   ) -%}
   {{- return(match.group(1) if match else s) -}}
 {%- endmacro %}
