@@ -142,6 +142,10 @@ To evaluate a specific agent version in CI, template `agent_version` in the YAML
 config with `dbt build --select support_agent_eval --vars '{agent_version: VERSION$3}'` before
 running it.
 
+`dbt build --empty` is fully supported. The materialization automatically unwraps the subquery
+that dbt uses to render `ref()` and `source()` under `--empty`, so CI jobs that compile models
+without reading data work correctly out of the box.
+
 ---
 
 ## Reading results
