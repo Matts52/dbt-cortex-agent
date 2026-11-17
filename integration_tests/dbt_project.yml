@@ -18,3 +18,8 @@ clean-targets:
 seeds:
   dbt_cortex_agent_integration_tests:
     +quote_columns: false
+
+# Let --defer see agents and search services (macros/relations/list_relations_without_caching.sql)
+dispatch:
+  - macro_namespace: dbt
+    search_order: ['dbt_cortex_agent_integration_tests', 'dbt_cortex_agent', 'dbt']

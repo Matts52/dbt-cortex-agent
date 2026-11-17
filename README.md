@@ -191,6 +191,17 @@ as a sibling dbt model or bootstrapped via run-operation.
 - **Privileges.** The executing role needs `CREATE AGENT` on the schema and `USAGE` on any
   semantic views or Cortex Search services named in `tool_resources`. See the
   [Cortex Agents docs](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents-manage).
+- **`--defer` and agents.** dbt-snowflake finds existing relations with `SHOW OBJECTS`, which
+  does not return agents or Cortex Search Services, so `--defer` always resolves `ref()` to the
+  deferred (production) object, even when a dev / CI copy exists. To let deferral see them, add the
+  package to the `dbt` dispatch search order:
+  ```yaml
+  dispatch:
+    - macro_namespace: dbt
+      search_order: ['<your_project>', 'dbt_cortex_agent', 'dbt']
+  ```
+  This uses the package's `snowflake__list_relations_without_caching`, which adds the schema's
+  agents and search services to the `SHOW OBJECTS` result.
 - **`cortex_mcp_api_integration` is account-level.** Requires ACCOUNTADMIN or CREATE INTEGRATION
   privilege. Consider a separate `dbt build --select cortex_mcp_api_integration:*` step under an
   elevated role if your normal service account shouldn't hold that privilege day-to-day.
