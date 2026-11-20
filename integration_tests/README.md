@@ -65,6 +65,12 @@ run-operation (uses `SHOW AGENTS` + `RESULT_SCAN`):
 dbt run-operation assert_agents_exist --target snowflake
 ```
 
+Check that `--defer` can see them (dbt's relation cache includes agents):
+
+```bash
+dbt run-operation assert_agents_in_relation_cache --target snowflake
+```
+
 Or manually in Snowflake:
 
 ```sql
